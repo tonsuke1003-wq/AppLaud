@@ -563,25 +563,29 @@ if __name__ == "__main__":
 
 ---
 
-## Step 8: AppLaud をセットアップする
-
-> ▶ **Windows のみ**: このステップをスキップしてください。
-
-> ▶ **Mac のみ**: 以下を実行してください。
+## Step 8: AppLaud をセットアップする【共通】
 
 作業フォルダ内に AppLaud をクローンします（Mac/Windows両対応のフォーク版）：
 
-```bash
-git clone https://github.com/tonsuke1003-wq/AppLaud.git ./AppLaud
-pip install -r ./AppLaud/requirements.txt
-```
+> ▶ **Mac のみ**:
+> ```bash
+> git clone https://github.com/tonsuke1003-wq/AppLaud.git ./AppLaud
+> pip3 install -r ./AppLaud/requirements.txt
+> ```
+> mp3/m4a処理に ffmpeg が必要です（未インストールの場合: `brew install ffmpeg`）
 
-> ffmpegが必要です（mp3/m4a処理に使用）。未インストールの場合: `brew install ffmpeg`
+> ▶ **Windows のみ**:
+> ```powershell
+> git clone https://github.com/tonsuke1003-wq/AppLaud.git ./AppLaud
+> pip install -r .\AppLaud\requirements.txt
+> ```
+> mp3/m4a処理に ffmpeg が必要です（[ffmpeg.org](https://ffmpeg.org/download.html) からインストールし PATH へ追加）
 
-次に `./AppLaud/script/config.py` を開いて、以下の項目を編集してください：
+次に `./AppLaud/script/config.py` を開いて設定を確認してください：
 
 ```python
-# ボイスレコーダーのボリューム名（例: "/Volumes/IC RECORDER" または "" で全ドライブ対象）
+# ボイスレコーダーのドライブ/ボリューム（空文字列で全リムーバブルドライブを対象）
+# Mac例: "/Volumes/IC RECORDER"  Windows例: "E:\\"
 RECORDER_DRIVE = ""
 
 # レコーダー内の音声ファイルサブディレクトリ（例: "RECORD" または ""）
@@ -591,18 +595,22 @@ VOICE_FILES_SUBDIR = "RECORD"
 > APIキー（`GEMINI_API_KEY`）は `./02_設定/.env` から自動読み込みされます。`config.py` に直接書かないでください。
 
 USB監視を起動するには：
-```bash
-python3 ./AppLaud/script/watch_usb.py
-```
+
+> ▶ **Mac のみ**: `python3 ./AppLaud/script/watch_usb.py`
+
+> ▶ **Windows のみ**: `python .\AppLaud\script\watch_usb.py`
 
 ボイスレコーダーを接続すると自動で処理が開始されます（Ctrl+C で停止）。
 
 手動実行（接続済みドライブを即時処理）：
-```bash
-python3 ./AppLaud/script/watch_usb.py --once
-```
 
-**（上級）launchd でログイン時に自動起動する場合：**
+> ▶ **Mac のみ**: `python3 ./AppLaud/script/watch_usb.py --once`
+
+> ▶ **Windows のみ**: `python .\AppLaud\script\watch_usb.py --once`
+
+**（上級）ログイン時に自動起動する場合：**
+
+> ▶ **Mac のみ**: launchd で設定します。
 
 ```bash
 WORK_DIR=$(pwd)
@@ -628,6 +636,23 @@ EOF
 
 launchctl load ~/Library/LaunchAgents/com.mycontext.applaud.plist
 echo "✅ launchd に登録しました"
+```
+
+> ▶ **Windows のみ**: タスクスケジューラーで設定します。PowerShell を**管理者権限**で実行：
+
+```powershell
+$workDir = (Get-Location).Path
+$scriptPath = "$workDir\AppLaud\script\watch_usb.py"
+$pythonPath = (Get-Command python -ErrorAction SilentlyContinue)?.Source
+if (-not $pythonPath) { $pythonPath = (Get-Command python3).Source }
+
+schtasks /create `
+  /tn "AppLaud\WatchUSB" `
+  /tr "`"$pythonPath`" `"$scriptPath`"" `
+  /sc ONLOGON `
+  /ru "$env:USERNAME" /f
+
+Write-Host "✅ タスクスケジューラーに登録しました"
 ```
 
 ---
@@ -835,11 +860,7 @@ metadata:
 
 ---
 
-## Step 11: AppLaud タスク抽出スクリプトを追加する
-
-> ▶ **Windows のみ**: このステップをスキップしてください。
-
-> ▶ **Mac のみ**: 以下を実行してください。
+## Step 11: AppLaud タスク抽出スクリプトを追加する【共通】
 
 `./AppLaud/script/extract_tasks.py` を作成してください。
 
@@ -982,9 +1003,10 @@ if __name__ == "__main__":
 ```
 
 動作確認：
-```bash
-python3 ./AppLaud/script/extract_tasks.py
-```
+
+> ▶ **Mac のみ**: `python3 ./AppLaud/script/extract_tasks.py`
+
+> ▶ **Windows のみ**: `python .\AppLaud\script\extract_tasks.py`
 
 ---
 
