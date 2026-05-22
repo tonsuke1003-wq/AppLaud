@@ -1251,13 +1251,13 @@ cat > ~/Library/LaunchAgents/com.mycontext.chatwork-digest.plist << EOF
     </dict>
     <key>StandardOutPath</key><string>/tmp/chatwork-digest.log</string>
     <key>StandardErrorPath</key><string>/tmp/chatwork-digest-err.log</string>
-    <key>RunAtLoad</key><false/>
+    <key>RunAtLoad</key><true/>
 </dict>
 </plist>
 EOF
 
 launchctl load ~/Library/LaunchAgents/com.mycontext.chatwork-digest.plist
-echo "✅ launchd に登録しました"
+echo "✅ launchd に登録しました（RunAtLoad=true: 起動時にも実行）"
 ```
 
 手動テスト：
@@ -1272,18 +1272,24 @@ python3 ./02_設定/chatwork-daily-digest.py
 PowerShellを**管理者権限**で実行してください：
 
 ```powershell
-$workDir = (Get-Location).Path
+$workDir    = (Get-Location).Path
 $scriptPath = "$workDir\02_設定\chatwork-daily-digest.py"
 $pythonPath = (Get-Command python -ErrorAction SilentlyContinue)?.Source
 if (-not $pythonPath) { $pythonPath = (Get-Command python3).Source }
 
-schtasks /create `
-  /tn "MyContext\ChatworkDailyDigest" `
-  /tr "`"$pythonPath`" `"$scriptPath`"" `
-  /sc DAILY /st 05:00 `
-  /ru "$env:USERNAME" /f
+$action   = New-ScheduledTaskAction -Execute "`"$pythonPath`"" -Argument "`"$scriptPath`""
+$trigger  = New-ScheduledTaskTrigger -Daily -At "05:00"
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
 
-Write-Host "✅ タスクスケジューラーに登録しました"
+Register-ScheduledTask `
+  -TaskName "MyContext\ChatworkDailyDigest" `
+  -Action $action `
+  -Trigger $trigger `
+  -Settings $settings `
+  -RunLevel Limited `
+  -Force
+
+Write-Host "✅ タスクスケジューラーに登録しました（PC起動後の遅延実行あり）"
 ```
 
 手動テスト：
