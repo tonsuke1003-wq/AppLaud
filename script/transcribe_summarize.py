@@ -10,6 +10,26 @@ import re  # For filename sanitization
 import google.generativeai as genai
 from pydub import AudioSegment
 
+
+def _load_env(path):
+    """シンプルな .env ローダー（外部ライブラリ不要）"""
+    p = pathlib.Path(path)
+    if not p.exists():
+        return
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, _, v = line.partition("=")
+            k, v = k.strip(), v.strip().strip('"').strip("'")
+            if k and not os.environ.get(k):
+                os.environ[k] = v
+
+
+# MyContextの02_設定/.envを自動読み込み（[作業フォルダ]/AppLaud/script/ → [作業フォルダ]/02_設定/.env）
+_script_dir = pathlib.Path(__file__).parent
+_env_path = _script_dir.parent.parent / "02_設定" / ".env"
+_load_env(_env_path)
+
 # Constants
 CHUNK_MAX_DURATION_MS = 20 * 60 * 1000  # 20 minutes in milliseconds
 OVERLAP_MS = 1 * 60 * 1000  # 1 minute in milliseconds
@@ -299,21 +319,23 @@ def main():
     )
     args = parser.parse_args()
 
-    api_key = os.getenv("GOOGLE_API_KEY")
+    # GOOGLE_API_KEY と GEMINI_API_KEY のどちらでも可
+    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
-        print("Error: GOOGLE_API_KEY environment variable not set.")
+        print("Error: GOOGLE_API_KEY (または GEMINI_API_KEY) が設定されていません。")
+        print("  02_設定/.env に GEMINI_API_KEY=your_key を設定してください。")
         if args.processed_log_file_path and args.audio_processing_dir:
             log_processed_file(
                 args.processed_log_file_path,
                 pathlib.Path(args.audio_processing_dir).name,
                 None,
                 "failure",
-                "GOOGLE_API_KEY not set",
+                "GOOGLE_API_KEY / GEMINI_API_KEY not set",
             )
         return
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")  # Using recommended model
+    model = genai.GenerativeModel("gemini-3-flash-preview")
 
     processing_dir = pathlib.Path(args.audio_processing_dir)
     markdown_output_dir = pathlib.Path(args.markdown_output_dir)
