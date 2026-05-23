@@ -1,4 +1,4 @@
-﻿私専用のコンテキストシステム「MyContext」を構築してください。
+私専用のコンテキストシステム「MyContext」を構築してください。
 以下のステップを順番に、すべて完了するまで止まらず実行してください。
 
 ---
@@ -49,6 +49,9 @@ python3 -c "import platform; print(platform.system())"
 
 ```
 GEMINI_API_KEY=
+CW_TOKEN=
+CW_NOTIFY_TOKEN=
+CW_TARGET_ROOM=
 ```
 
 ---
@@ -173,9 +176,51 @@ my_profile.mdの形式：
 | 「まとめて」 | `04_ナレッジ/切り抜き/` の未整理素材 → `04_ナレッジ/情報源/` にWiki化 |
 | 「〇〇を開いて」 | openコマンドで該当ファイル/フォルダを開く |
 | 「AppLaudからタスク抽出」「AppLaudのタスクをMASTERに入れて」 | `python3 ./AppLaud/script/extract_tasks.py` を実行してMASTER_TASKS.mdを更新 |
+| 「AppLaud確認して」「AppLaud動いてる？」「音声メモ確認」 | AppLaud処理済みログ確認・未処理ファイル確認・最新要約確認を実行して報告 |
+| 「AppLaud手動実行」「音声を処理して」「録音を処理して」 | `./AppLaud/` 内の未処理ファイルを手動で処理 |
+| 「AppLaud最新の要約見せて」「最後のAppLaud何の話だった？」 | `./06_AppLaud/` の最新MDファイルを読んで内容を報告 |
+| 「AppLaudが止まってる」「音声処理が止まってる」 | `.tmp_chunks`確認→stale削除→再実行で自律復旧 |
+| 「記事を知識にまとめて」「保存した記事を整理して」 | `python3 ./02_設定/vault-maintenance.py compile` を実行 |
+| 「知識ページをチェックして」「ナレッジ古くなってない？」 | `python3 ./02_設定/vault-maintenance.py lint` を実行 |
+| 「知識一覧更新して」「まとめ一覧を作り直して」 | `python3 ./02_設定/vault-maintenance.py index` を実行 |
 | 「メモリ見せて」「記憶一覧」 | `~/.claude/projects/[カレントプロジェクトハッシュ]/memory/MEMORY.md` を読んで一覧表示 |
 | 「〇〇を覚えておいて」「〇〇を記憶して」 | memoryフォルダに適切なタイプで保存し、MEMORY.mdに追記 |
 | 「〇〇を忘れて」 | 該当memoryファイルを削除またはMEMORY.mdから除去 |
+
+---
+
+## サブエージェント ルーティング
+
+「レビューして」「サブエージェントでチェックして」と言われたら、直前の作業に合わせて最適なエージェントを起動する。
+
+| 直前の作業 | 起動するエージェント |
+|---|---|
+| Pythonコード | `python-reviewer` |
+| TypeScript / JavaScriptコード | `typescript-reviewer` |
+| その他コード・汎用 | `code-reviewer` |
+| DB設計・SQLクエリ | `database-reviewer` |
+| システム設計・技術選定 | `architect` |
+| セキュリティ懸念あり | `security-reviewer` |
+
+---
+
+## アプリ・システム構築ルール（A→B→C）
+
+「〇〇を作って」「〇〇を修正して」など構築・改修依頼が来た時は必ずA→B→Cの順で進める。
+
+### ターンA（監査）— コード編集禁止
+- 関連ファイルを読み、現状実装を把握する
+- 仕様の各要件を「実装済み／一部実装／未実装／仕様ズレ」の4分類で判定する
+- 各判定に根拠となるファイル名・関数名・行番号を必ず書く
+
+### ターンB（計画）— コード編集禁止
+- 未実装・仕様ズレ項目だけを対象に改修計画を書く
+- 「対象ファイル・変更内容・確認方法」を明記する
+
+### ターンC（実装）
+- 前ターンの計画に載っている内容だけ実装する
+- 実装後は要件チェックリストで自己監査する
+- 未達項目があれば完了と書かず未達一覧を明示する
 
 ---
 
@@ -418,9 +463,13 @@ if __name__ == "__main__":
   "hooks": {
     "UserPromptSubmit": [
       {
-        "type": "command",
-        "command": "python3 ~/.claude/hooks/user-prompt-save.py",
-        "timeout": 10
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/hooks/user-prompt-save.py",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -447,14 +496,22 @@ if __name__ == "__main__":
     ],
     "Stop": [
       {
-        "type": "command",
-        "command": "python3 ~/.claude/auto-save-context.py",
-        "timeout": 30
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/auto-save-context.py 2>/dev/null || true",
+            "timeout": 30,
+            "async": true,
+            "statusMessage": "チャット履歴を自動保存中..."
+          }
+        ]
       }
     ]
   }
 }
 ```
+
+> ▶ **Windows のみ — Stop フック**: `"command"` の値を `"python %USERPROFILE%\\.claude\\auto-save-context.py"` に変更してください（`2>/dev/null || true` はWindows非対応です）。
 
 ---
 
@@ -641,7 +698,7 @@ echo "✅ launchd に登録しました"
 > ▶ **Windows のみ**: タスクスケジューラーで設定します。PowerShell を**管理者権限**で実行：
 
 ```powershell
-$workDir = (Get-Location).Path
+$workDir    = (Get-Location).Path
 $scriptPath = "$workDir\AppLaud\script\watch_usb.py"
 $pythonPath = (Get-Command python -ErrorAction SilentlyContinue)?.Source
 if (-not $pythonPath) { $pythonPath = (Get-Command python3).Source }
@@ -727,9 +784,229 @@ if __name__ == "__main__":
 
 ---
 
-## Step 10: MASTER_TASKS.md と memory システムを作成する【共通】
+## Step 10: vault-maintenance.py を作成する【共通】
 
-### 10-1: MASTER_TASKS.md を作成する
+ナレッジ管理スクリプトを作成します。「記事を知識にまとめて」などのトリガーワードでClaudeが自動実行します。
+
+`./02_設定/vault-maintenance.py` を作成してください。
+
+```python
+#!/usr/bin/env python3
+"""
+vault-maintenance.py
+04_ナレッジ/切り抜き/ のMarkdown記事をGemini APIでWiki知識ページに変換し、
+04_ナレッジ/情報源/ に保存する。
+
+使い方:
+  python3 ./02_設定/vault-maintenance.py compile  # 切り抜き→情報源変換
+  python3 ./02_設定/vault-maintenance.py lint     # 古い/重複ページを検出
+  python3 ./02_設定/vault-maintenance.py index    # 情報源/_index.md を再生成
+"""
+
+import sys
+import os
+import json
+import urllib.request
+from pathlib import Path
+from datetime import datetime, timezone
+
+# スクリプト位置（02_設定/）の1つ上がプロジェクトルート
+BASE_DIR  = Path(__file__).parent.parent
+CLIPPINGS = BASE_DIR / "04_ナレッジ" / "切り抜き"
+SOURCES   = BASE_DIR / "04_ナレッジ" / "情報源"
+ENV_PATH  = BASE_DIR / "02_設定" / ".env"
+DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
+
+def load_env(path: Path) -> dict:
+    env = {}
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return env
+
+def get_gemini_key() -> str:
+    env = load_env(ENV_PATH)
+    return env.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
+
+def gemini_generate(prompt: str, api_key: str, model: str = DEFAULT_GEMINI_MODEL) -> str:
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    payload = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"maxOutputTokens": 4096, "temperature": 0.3},
+    }, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as res:
+            data = json.load(res)
+            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except Exception as e:
+        print(f"  Gemini APIエラー: {e}", file=sys.stderr)
+        return ""
+
+def cmd_compile():
+    api_key = get_gemini_key()
+    if not api_key:
+        print("❌ GEMINI_API_KEYが.envに設定されていません")
+        print(f"   設定先: {ENV_PATH}")
+        sys.exit(1)
+
+    SOURCES.mkdir(parents=True, exist_ok=True)
+    clips = sorted(CLIPPINGS.glob("*.md")) if CLIPPINGS.exists() else []
+
+    if not clips:
+        print(f"切り抜きにファイルが見つかりません: {CLIPPINGS}")
+        return
+
+    print(f"対象: {len(clips)}件")
+    converted = 0
+
+    for clip in clips:
+        out_name = clip.stem + "_wiki.md"
+        out_path = SOURCES / out_name
+        if out_path.exists():
+            print(f"  スキップ（既存）: {clip.name}")
+            continue
+
+        print(f"  変換中: {clip.name} → {out_name}")
+        text = clip.read_text(encoding="utf-8", errors="ignore")
+
+        prompt = f"""以下はWebページの切り抜き記事です。
+この内容を「いつでも参照できる知識ページ（Wiki形式）」に変換してください。
+
+【変換ルール】
+- タイトルは「# 知識: [トピック名]」の形式
+- 「## 要点」「## 詳細」「## 活用メモ」の3セクションで構成
+- 時事的な内容（「今日は〜」「最近は〜」など）は削除し、恒久的な知識だけ残す
+- 元記事のURLがあればfooterに「出典: [URL]」として記載
+- 日本語で出力
+
+【元記事】
+{text[:4000]}
+"""
+        wiki = gemini_generate(prompt, api_key)
+        if not wiki:
+            print(f"    ⚠️ 変換失敗: {clip.name}")
+            continue
+
+        header = f"---\nsource: {clip.name}\ncreated: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}\n---\n\n"
+        out_path.write_text(header + wiki, encoding="utf-8")
+        converted += 1
+
+    print(f"\n✅ 変換完了: {converted}件 → {SOURCES}")
+
+def cmd_lint():
+    if not SOURCES.exists():
+        print(f"情報源フォルダが存在しません: {SOURCES}")
+        return
+
+    pages = sorted(SOURCES.glob("*.md"))
+    pages = [p for p in pages if p.name != "_index.md"]
+    print(f"チェック対象: {len(pages)}件\n")
+
+    issues = []
+    now = datetime.now(timezone.utc)
+    titles = {}
+
+    for page in pages:
+        try:
+            text = page.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+
+        for line in text.splitlines():
+            if line.startswith("created:"):
+                try:
+                    created_str = line.split(":", 1)[1].strip()
+                    created = datetime.fromisoformat(created_str).replace(tzinfo=timezone.utc)
+                    age_days = (now - created).days
+                    if age_days > 180:
+                        issues.append(f"⏰ 古い ({age_days}日): {page.name}")
+                except Exception:
+                    pass
+
+        for line in text.splitlines():
+            if line.startswith("# "):
+                title = line.lstrip("# ").strip()
+                if title in titles:
+                    issues.append(f"🔁 重複タイトル: {page.name} ← {titles[title]}")
+                else:
+                    titles[title] = page.name
+                break
+
+    if not issues:
+        print("✅ 問題なし（古いページ・重複なし）")
+    else:
+        print("⚠️ 検出された問題:")
+        for issue in issues:
+            print(f"  {issue}")
+        print(f"\n合計: {len(issues)}件")
+
+def cmd_index():
+    SOURCES.mkdir(parents=True, exist_ok=True)
+    pages = sorted(SOURCES.glob("*.md"))
+    pages = [p for p in pages if p.name != "_index.md"]
+
+    lines = [
+        "# ナレッジ インデックス\n",
+        f"> 最終更新: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n",
+        f"> 総ページ数: {len(pages)}\n",
+        "\n---\n",
+    ]
+
+    for page in pages:
+        try:
+            text = page.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        title = page.stem
+        desc = ""
+        for line in text.splitlines():
+            if line.startswith("# "):
+                title = line.lstrip("# ").strip()
+            if line.startswith("## 要点"):
+                idx = text.find("## 要点")
+                snippet_start = idx + len("## 要点")
+                snippet = text[snippet_start:snippet_start + 100].strip()
+                desc = snippet.split("\n")[0][:80]
+                break
+        lines.append(f"- [{title}]({page.name}) — {desc}\n")
+
+    index_path = SOURCES / "_index.md"
+    index_path.write_text("".join(lines), encoding="utf-8")
+    print(f"✅ インデックス更新完了: {index_path} ({len(pages)}件)")
+
+COMMANDS = {
+    "compile": cmd_compile,
+    "lint":    cmd_lint,
+    "index":   cmd_index,
+}
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
+        print("使い方: python3 vault-maintenance.py [compile|lint|index]")
+        print("  compile — 切り抜き/ の記事を情報源/ のWikiページに変換")
+        print("  lint    — 情報源/ の古いページ・重複を検出")
+        print("  index   — 情報源/_index.md を再生成")
+        sys.exit(1)
+    COMMANDS[sys.argv[1]]()
+```
+
+動作確認（APIキー未設定でもOK）：
+
+> ▶ **Mac のみ**: `python3 ./02_設定/vault-maintenance.py index`
+
+> ▶ **Windows のみ**: `python .\02_設定\vault-maintenance.py index`
+
+---
+
+## Step 11: MASTER_TASKS.md と memory システムを作成する【共通】
+
+### 11-1: MASTER_TASKS.md を作成する
 
 `./07_タスク/MASTER_TASKS.md` を作成してください。
 
@@ -779,7 +1056,7 @@ if __name__ == "__main__":
 - 期限が近いタスクは朝のブリーフィングで通知される
 ```
 
-### 10-2: memory フォルダのパスを確認する
+### 11-2: memory フォルダのパスを確認する
 
 以下のPythonスクリプトを実行して、正しいパスを調べてください：
 
@@ -817,7 +1094,7 @@ if projects_dir.exists():
 
 次に、出力されたパスにmemoryフォルダを作成してください。
 
-### 10-3: MEMORY.md（インデックスファイル）を作成する
+### 11-3: MEMORY.md（インデックスファイル）を作成する
 
 ```markdown
 # MEMORY INDEX
@@ -841,7 +1118,7 @@ if projects_dir.exists():
 （ここにreferenceタイプのmemoryを追記していく）
 ```
 
-### 10-4: 最初のmemoryファイルを作成する
+### 11-4: 最初のmemoryファイルを作成する
 
 `user_profile.md`（MEMORY.mdと同じフォルダ内）を作成してください。
 
@@ -860,7 +1137,7 @@ metadata:
 
 ---
 
-## Step 11: AppLaud タスク抽出スクリプトを追加する【共通】
+## Step 12: AppLaud タスク抽出スクリプトを追加する【共通】
 
 `./AppLaud/script/extract_tasks.py` を作成してください。
 
@@ -1010,19 +1287,12 @@ if __name__ == "__main__":
 
 ---
 
-## Step 12: Chatwork 朝ブリーフィング設定
+## Step 13: Chatwork 朝ブリーフィング設定
 
-### 12-1: .envにChatworkのキーを追加する【共通】
+> `.env` の4キーはStep 2で作成済みです。値をテキストエディタで入力してから先に進んでください。
+> （`CW_TOKEN` / `CW_NOTIFY_TOKEN` / `CW_TARGET_ROOM` / `GEMINI_API_KEY`）
 
-`./02_設定/.env` を開いて、以下の3行を追加してください：
-
-```
-CW_TOKEN=
-CW_NOTIFY_TOKEN=
-CW_TARGET_ROOM=
-```
-
-### 12-2: chatwork-daily-digest.py を作成する【共通】
+### 13-1: chatwork-daily-digest.py を作成する【共通】
 
 `./02_設定/chatwork-daily-digest.py` を作成してください。
 
@@ -1225,7 +1495,7 @@ if __name__ == "__main__":
     main()
 ```
 
-### 12-3: 毎朝5:00に自動実行する設定
+### 13-2: 毎朝5:00に自動実行する設定
 
 > ▶ **Mac のみ**: launchd で設定します。
 
@@ -1299,18 +1569,426 @@ python .\02_設定\chatwork-daily-digest.py
 
 ---
 
-## Step 13: 動作確認
+## Step 14: ダッシュボード・ランチャーを作成する
+
+CLAUDE.mdビューア・ルール解説・アプリランチャー・スキル一覧・Claude起動ショートカットの5ファイルを作成します。
+
+> **確認事項（作成前に答えてください）**
+>
+> 1. Step 4 で決めた「あなたの名前（ニックネーム）」は何ですか？
+> 2. Step 4 で決めた「AI名」は何ですか？
+>
+> この2つの値を以下の `[あなたの名前]` と `[AI名]` のプレースホルダーに当てはめながら5ファイルを作成してください。
+
+---
+
+### 14-1: CLAUDE.md ビューア（claude_md_viewer.html）
+
+`./claude_md_viewer.html` を以下の内容で作成してください。
+`[あなたの名前]` と `[AI名]` は Step 4 で決めた値に置き換えてください。
+
+```html
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CLAUDE.md ビューア — [あなたの名前]のAIシステム</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Hiragino Sans', 'Noto Sans JP', sans-serif; background: #0d0d0d; color: #e8e8e8; min-height: 100vh; }
+  header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-bottom: 1px solid #2a2a4a; padding: 24px 32px; }
+  header h1 { font-size: 22px; font-weight: 700; color: #fff; }
+  header p { font-size: 13px; color: #7a7aaa; margin-top: 4px; }
+  .tab-bar { display: flex; background: #111; border-bottom: 1px solid #222; padding: 0 32px; }
+  .tab-btn { padding: 14px 28px; font-size: 14px; font-weight: 600; color: #666; border: none; background: none; cursor: pointer; border-bottom: 3px solid transparent; transition: all 0.2s; }
+  .tab-btn.active { color: #a0a0ff; border-bottom-color: #a0a0ff; }
+  .container { max-width: 860px; margin: 0 auto; padding: 32px 24px; }
+  .section { background: #111; border: 1px solid #222; border-radius: 12px; padding: 24px; margin-bottom: 16px; }
+  .section-title { font-size: 15px; font-weight: 700; color: #e8e8e8; margin-bottom: 8px; }
+  .section-desc { font-size: 13px; color: #888; line-height: 1.7; margin-bottom: 12px; }
+  .rule-block { background: #0a0a0a; border-left: 3px solid #4a4aff; border-radius: 6px; padding: 12px 16px; font-size: 13px; color: #b0b0e8; line-height: 1.8; margin-top: 8px; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 3px 10px; border-radius: 20px; margin-right: 8px; margin-bottom: 8px; }
+  .badge-global { background: rgba(100,140,212,0.15); color: #6496D4; border: 1px solid rgba(100,140,212,0.3); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🧠 CLAUDE.md ビューア — [あなたの名前]のAIシステム</h1>
+  <p>[AI名]（Claude Code）の動作を定義する設定ファイルの可視化</p>
+</header>
+<div class="tab-bar">
+  <button class="tab-btn active">グローバル設定（~/.claude/CLAUDE.md）</button>
+</div>
+<div class="container">
+  <div class="section">
+    <div class="section-title">[AI名] — [あなたの名前]専用AIビジネスパートナー</div>
+    <span class="badge badge-global">GLOBAL</span>
+    <div class="section-desc">このCLAUDE.mdが[AI名]の「人格・基本ルール」を定義する。どのフォルダで起動しても常に読み込まれる。</div>
+    <div class="rule-block">
+      GREEN（ファイル操作・調査・生成・コード）→ 確認なしで即実行<br>
+      YELLOW（外部サービス初回連携・設定変更）→ 実行前に1行報告してから進む<br>
+      RED（支払い・課金承認・外部公開・契約）→ 必ず止まって確認を待つ
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-title">一気通貫実行モード</div>
+    <div class="section-desc">「終わったら教えて」「全部やって」「番号付きリスト」で自動発動。REDだけ止まる。</div>
+  </div>
+  <div class="section">
+    <div class="section-title">ナレッジベース — トリガーワード</div>
+    <div class="rule-block">
+      「タスク見せて」→ MASTER_TASKS.mdを読んで報告<br>
+      「全部やって」→ REDを除く全タスクを自律実行<br>
+      「クリップ」→ 04_ナレッジ/切り抜き/ に保存<br>
+      「まとめて」→ 切り抜き/ を 情報源/ にWiki化<br>
+      「記事を知識にまとめて」→ vault-maintenance.py compile<br>
+      URL貼るだけ → 自動取得・保存
+    </div>
+  </div>
+  <div class="section">
+    <div class="section-title">ターンA→B→C（アプリ・システム構築）</div>
+    <div class="rule-block">
+      A（監査）: 現状を把握・要件を分類。コード編集禁止<br>
+      B（計画）: 未実装・仕様ズレのみ対象に計画。コード編集禁止<br>
+      C（実装）: 計画通りに実装。スコープを勝手に広げない
+    </div>
+  </div>
+</div>
+<script>
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>
+```
+
+---
+
+### 14-2: CLAUDE.md ルール解説（claude_md_rules.html）
+
+`./claude_md_rules.html` を以下の内容で作成してください。
+`[あなたの名前]` と `[AI名]` は Step 4 で決めた値に置き換えてください。
+
+```html
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CLAUDE.md ルール解説 — [あなたの名前]×[AI名]</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif; background: #0f1117; color: #e2e8f0; line-height: 1.7; }
+  .header { background: linear-gradient(135deg, #1a1a2e, #16213e); padding: 40px 32px; border-bottom: 1px solid #2a2a4a; }
+  h1 { font-size: 24px; font-weight: 800; color: #fff; }
+  .subtitle { font-size: 13px; color: #7a7aaa; margin-top: 6px; }
+  .layout { display: flex; min-height: calc(100vh - 120px); }
+  .sidebar { width: 220px; flex-shrink: 0; background: #0d0d14; border-right: 1px solid #1e1e30; padding: 24px 0; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .sidebar-item { display: block; padding: 10px 20px; font-size: 13px; color: #666; cursor: pointer; border-left: 3px solid transparent; transition: all 0.2s; text-decoration: none; }
+  .sidebar-item:hover, .sidebar-item.active { color: #a0a0ff; border-left-color: #a0a0ff; background: rgba(100,100,255,0.06); }
+  .main { flex: 1; padding: 40px; max-width: 720px; }
+  .section { margin-bottom: 48px; }
+  .section-title { font-size: 18px; font-weight: 700; color: #e2e8f0; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #222; }
+  .rule-card { background: #131825; border: 1px solid #1e2a3a; border-radius: 10px; padding: 20px; margin-bottom: 14px; }
+  .rule-title { font-size: 14px; font-weight: 700; color: #a0c4ff; margin-bottom: 8px; }
+  .rule-why { font-size: 12px; color: #64748b; line-height: 1.8; margin-bottom: 8px; }
+  .original-block { background: #0a0f1a; border-left: 3px solid #4a6fa5; padding: 10px 14px; font-size: 12px; color: #7090b0; border-radius: 4px; font-family: monospace; }
+  .file-badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 12px; background: rgba(100,140,212,0.15); color: #6496D4; border: 1px solid rgba(100,140,212,0.3); margin-left: 8px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>CLAUDE.md ルール解説 — [あなたの名前] × [AI名]</h1>
+  <p class="subtitle">各ルールの「なぜ」を解説するリファレンス</p>
+</div>
+<div class="layout">
+  <nav class="sidebar">
+    <a class="sidebar-item active" onclick="scrollToSection('green-yellow-red', this)">① GREEN/YELLOW/RED</a>
+    <a class="sidebar-item" onclick="scrollToSection('one-shot', this)">② 一気通貫実行</a>
+    <a class="sidebar-item" onclick="scrollToSection('triggers', this)">③ トリガーワード</a>
+    <a class="sidebar-item" onclick="scrollToSection('turn-abc', this)">④ ターンA→B→C</a>
+    <a class="sidebar-item" onclick="scrollToSection('never', this)">⑤ 絶対にやらせない原則</a>
+  </nav>
+  <main class="main">
+    <div class="section" id="green-yellow-red">
+      <div class="section-title">① GREEN / YELLOW / RED <span class="file-badge">グローバル</span></div>
+      <div class="rule-card">
+        <div class="rule-title">行動を3段階に分類してAIの自律性を制御する</div>
+        <div class="rule-why">全ての操作にいちいち確認していたら効率が下がる。でも全部任せると取り消せない操作が起きる。GREEN/YELLOW/REDで「止まる場所だけ明示」することで、AIは迷わず動き続けられる。</div>
+        <div class="original-block">GREEN → 確認なし即実行 / YELLOW → 1行報告して続行 / RED → 必ず止まって確認</div>
+      </div>
+    </div>
+    <div class="section" id="one-shot">
+      <div class="section-title">② 一気通貫実行モード <span class="file-badge">グローバル</span></div>
+      <div class="rule-card">
+        <div class="rule-title">「終わったら教えて」だけで全タスクを連続実行させる</div>
+        <div class="rule-why">タスクごとに「次どうしますか？」と止まるAIは生産性を下げる。発動トリガーと停止条件を明示することで、人間は承認だけすれば済む状態を作る。</div>
+        <div class="original-block">「終わったら教えて」「全部やって」「番号付きリスト」で自動発動。止まる唯一の条件: RED該当 / 「止めて」と言った時</div>
+      </div>
+    </div>
+    <div class="section" id="triggers">
+      <div class="section-title">③ トリガーワード <span class="file-badge">グローバル</span></div>
+      <div class="rule-card">
+        <div class="rule-title">コマンドより「言葉で動く」設計</div>
+        <div class="rule-why">「タスク見せて」「まとめて」など自然な言葉でAIが動く設計にすることで、ツールを意識せず使える。コマンドを覚えるコストをゼロにする。</div>
+        <div class="original-block">「タスク見せて」→ MASTER_TASKS確認 / URL貼るだけ → 自動クリップ / 「全部やって」→ 自律実行</div>
+      </div>
+    </div>
+    <div class="section" id="turn-abc">
+      <div class="section-title">④ ターンA→B→C <span class="file-badge">グローバル</span></div>
+      <div class="rule-card">
+        <div class="rule-title">実装前に必ず監査→計画を挟む</div>
+        <div class="rule-why">AIは指示されると即コードを書きたがる。でも現状把握なしに書いたコードは既存の仕様とズレることが多い。AとBでコード編集を禁止することで「考えてから作る」を強制する。</div>
+        <div class="original-block">A（監査）→ B（計画）→ C（実装）の順。AとBはコード編集禁止</div>
+      </div>
+    </div>
+    <div class="section" id="never">
+      <div class="section-title">⑤ 絶対にやらせない原則 <span class="file-badge">グローバル</span></div>
+      <div class="rule-card">
+        <div class="rule-title">人間が操作すべき場面をAIに任せない</div>
+        <div class="rule-why">エラー修正・情報取得・代替手段の模索は全てAIが自律解決する。「貼り付けてください」「確認してください」は禁止。AIが詰まっても人間を巻き込まず、解決してから報告する。</div>
+        <div class="original-block">エラー修正 / URL取得 / ツール代替策 → 全てAIが自律解決してから報告</div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+  function scrollToSection(id, el) {
+    document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
+    document.querySelectorAll('.sidebar-item').forEach(e => e.classList.remove('active'));
+    el.classList.add('active');
+  }
+</script>
+</body>
+</html>
+```
+
+---
+
+### 14-3: アプリ一覧ランチャー（app_launcher.html）
+
+`./app_launcher.html` を以下の内容で作成してください。
+`[あなたの名前]` と `[AI名]` は Step 4 で決めた値に置き換えてください。
+
+```html
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>[あなたの名前] — アプリ一覧</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #0F0F0F; color: #F0EDE8; min-height: 100vh; padding: 40px 20px; }
+    .header { text-align: center; margin-bottom: 48px; }
+    .header-badge { display: inline-block; background: linear-gradient(135deg, #D4726A, #B76E79); color: white; font-size: 11px; font-weight: 700; letter-spacing: 2px; padding: 6px 16px; border-radius: 20px; margin-bottom: 16px; }
+    .header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+    .header p { font-size: 13px; color: #7A7570; }
+    .grid { max-width: 860px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+    .card { background: #1A1A1A; border: 1px solid #2A2A2A; border-radius: 16px; padding: 24px; transition: all 0.2s; }
+    .card:hover { border-color: #444; transform: translateY(-2px); }
+    .card-icon { font-size: 36px; margin-bottom: 14px; display: block; }
+    .card-tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 1.5px; padding: 3px 10px; border-radius: 20px; margin-bottom: 10px; }
+    .tag-tool { background: rgba(100,140,212,0.15); color: #6496D4; border: 1px solid rgba(100,140,212,0.3); }
+    .tag-local { background: rgba(160,100,200,0.15); color: #C87EE0; border: 1px solid rgba(160,100,200,0.3); }
+    .card h2 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+    .card p { font-size: 12px; color: #7A7570; line-height: 1.7; margin-bottom: 20px; }
+    .btn-open { display: inline-block; background: linear-gradient(135deg, #D4726A, #B76E79); color: white; text-decoration: none; padding: 10px 20px; border-radius: 30px; font-size: 13px; font-weight: 700; cursor: pointer; border: none; transition: all 0.2s; }
+    .btn-open:hover { opacity: 0.85; }
+    .card-claude { background: linear-gradient(135deg, #1A1A2E 0%, #16213E 100%); border-color: #2A2A4A; grid-column: 1 / -1; }
+    .claude-inner { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+    .claude-icon { font-size: 48px; flex-shrink: 0; }
+    .claude-info { flex: 1; min-width: 200px; }
+    .claude-info h2 { font-size: 18px; margin-bottom: 6px; }
+    .claude-info p { margin-bottom: 0; }
+    .cmd-box { background: #0A0A1A; border: 1px solid #2A2A4A; border-radius: 10px; padding: 12px 16px; font-family: monospace; font-size: 14px; color: #6AB86A; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; cursor: pointer; }
+    .cmd-copy { font-size: 11px; color: #555; font-family: sans-serif; flex-shrink: 0; }
+    .copied { color: #6AB86A !important; }
+    .section-label { max-width: 860px; margin: 0 auto 12px; font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #444; padding-left: 4px; }
+    .section-label:not(:first-child) { margin-top: 36px; }
+    .footer { text-align: center; margin-top: 48px; font-size: 11px; color: #333; }
+  </style>
+</head>
+<body>
+<div class="header">
+  <div class="header-badge">MY AI LAB</div>
+  <h1>アプリ一覧</h1>
+  <p>[あなたの名前]が作ったツール・アプリのランチャー</p>
+</div>
+
+<div class="section-label">AI ASSISTANT</div>
+<div class="grid" style="margin-bottom:0">
+  <div class="card card-claude">
+    <div class="claude-inner">
+      <span class="claude-icon">🤖</span>
+      <div class="claude-info">
+        <span class="card-tag tag-tool">TOOL</span>
+        <h2>[AI名]（Claude Code）</h2>
+        <p>アプリの作成・修正・調査など何でも依頼できるAI。ターミナルから起動します。</p>
+        <div class="cmd-box" onclick="copyCmd(this, 'claude')">
+          <span>$ claude</span>
+          <span class="cmd-copy">クリックでコピー</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section-label" style="margin-top:36px">LOCAL FILES — ローカル</div>
+<div class="grid">
+  <div class="card">
+    <span class="card-icon">📋</span>
+    <span class="card-tag tag-local">LOCAL</span>
+    <h2>スキル一覧</h2>
+    <p>Claude Codeで使えるスキルの一覧。どんなことをAIに頼めるか確認できます。</p>
+    <a class="btn-open" href="skill_list.md">開く →</a>
+  </div>
+  <div class="card">
+    <span class="card-icon">🧠</span>
+    <span class="card-tag tag-local">LOCAL</span>
+    <h2>CLAUDE.md ビューア</h2>
+    <p>AIのルール設定を可視化。GREEN/YELLOW/REDの意味やトリガーワードを確認できます。</p>
+    <a class="btn-open" href="claude_md_viewer.html">開く →</a>
+  </div>
+  <div class="card">
+    <span class="card-icon">📖</span>
+    <span class="card-tag tag-local">LOCAL</span>
+    <h2>CLAUDE.md ルール解説</h2>
+    <p>各ルールの「なぜ」を解説するリファレンス。設定の背景にある考え方がわかります。</p>
+    <a class="btn-open" href="claude_md_rules.html">開く →</a>
+  </div>
+</div>
+
+<div class="footer">
+  最終更新：<span id="date"></span>　|　[あなたの名前] AI Lab
+</div>
+
+<script>
+  document.getElementById('date').textContent = new Date().toLocaleDateString('ja-JP');
+  function copyCmd(el, cmd) {
+    navigator.clipboard.writeText(cmd).then(() => {
+      const hint = el.querySelector('.cmd-copy');
+      hint.textContent = 'コピーしました！';
+      hint.classList.add('copied');
+      setTimeout(() => { hint.textContent = 'クリックでコピー'; hint.classList.remove('copied'); }, 2000);
+    });
+  }
+</script>
+</body>
+</html>
+```
+
+---
+
+### 14-4: スキル一覧（skill_list.md）
+
+`./skill_list.md` を以下の内容で作成してください。
+
+```markdown
+# スキル・コマンド一覧
+
+> このファイルは使えるスキルの一覧です。「/スキル名」で呼び出せます。
+
+---
+
+## コンテンツ・発信
+
+- **`/article-writing`** 記事・長文コンテンツ作成
+- **`/content-engine`** SNSコンテンツ量産エンジン（X・LinkedIn・TikTok等）
+- **`/crosspost`** SNS一括クロスポスト（X・Threads・Bluesky等）
+
+## 動画・メディア
+
+- **`/fal-ai-media`** AI画像・動画・音声生成（fal.ai経由）
+- **`/video-editing`** AI動画編集ワークフロー
+
+## リサーチ・調査
+
+- **`/deep-research`** 深層リサーチ（複数情報源・出典付きレポート）
+- **`/market-research`** 市場調査・競合分析
+
+## ビジネス
+
+- **`/investor-materials`** 投資家向け資料作成
+
+## AIエージェント・自動化
+
+- **`/agentic-engineering`** エージェントエンジニアリング設計
+
+## セキュリティ
+
+- **`/security-review`** セキュリティレビュー
+
+## ツール・ユーティリティ
+
+- **`/docx`** Word文書生成
+- **`/pptx`** PowerPoint生成
+
+---
+
+## エージェント（委譲・サブタスク用）
+
+- **`architect`** システム設計・技術的意思決定
+- **`code-reviewer`** コード品質・セキュリティレビュー
+- **`python-reviewer`** Pythonコードレビュー
+- **`typescript-reviewer`** TypeScript/JavaScriptレビュー
+- **`security-reviewer`** セキュリティ脆弱性検出
+- **`database-reviewer`** PostgreSQL・DBのレビュー
+- **`deep-research`** 深層リサーチ
+
+---
+
+## スキルの追加方法
+
+**グローバル（全プロジェクトで使いたい）**
+→ `~/.claude/skills/` にスキルフォルダをコピー
+
+**このプロジェクト専用**
+→ `.claude/skills/スキル名/SKILL.md` を作成
+```
+
+---
+
+### 14-5: Claude起動ショートカット（open_claude.command）
+
+> **⚠️ Mac 専用の手順です。**
+> Windows の方はターミナル（コマンドプロンプト / PowerShell）から `cd` でこの作業フォルダへ移動 → `claude` と入力して起動してください。このステップはスキップできます。
+
+> ▶ **Mac のみ**: `./open_claude.command` を以下の内容で作成してください。
+
+```bash
+#!/bin/bash
+cd "$(dirname "$0")"
+claude
+```
+
+作成後、実行権限を付与してください：
+
+```bash
+chmod +x ./open_claude.command
+```
+
+---
+
+## Step 15: 動作確認
 
 > ▶ **Mac のみ**: 以下のbashコマンドで確認してください。
 
 ```bash
-ls ./                        # フォルダが全部あるか
-ls ~/.claude/hooks/          # 3つのPythonスクリプトがあるか
-cat ~/.claude/CLAUDE.md      # 名前・memoryシステムが入っているか
+ls ./                         # フォルダが全部あるか（06_AppLaud, 07_タスク 含む）
+ls ~/.claude/hooks/           # 3つのPythonスクリプトがあるか
+cat ~/.claude/CLAUDE.md       # 名前・SubAgent・A→B→C・vault-maintenanceトリガーが入っているか
 cat ./03_私について/my_profile.md
 cat ./07_タスク/MASTER_TASKS.md
-ls ~/.claude/projects/       # 作業フォルダに対応するプロジェクトフォルダがあるか
-cat ./02_設定/.env            # 全4キーの行があるか（値は空でOK）
+ls ~/.claude/projects/        # 作業フォルダに対応するプロジェクトフォルダがあるか
+cat ./02_設定/.env             # 全4キーの行があるか（値は空でOK）
+python3 ./02_設定/vault-maintenance.py index   # エラーなく動作するか
+ls ./claude_md_viewer.html ./claude_md_rules.html ./app_launcher.html ./skill_list.md ./open_claude.command
 launchctl list | grep com.mycontext   # chatwork-digestジョブが登録されているか
 ```
 
@@ -1319,15 +1997,19 @@ launchctl list | grep com.mycontext   # chatwork-digestジョブが登録され�
 > ▶ **Windows のみ**: 以下のPowerShellコマンドで確認してください。
 
 ```powershell
-dir .\                       # フォルダが全部あるか
-dir $HOME\.claude\hooks\     # 3つのPythonスクリプトがあるか
-Get-Content $HOME\.claude\CLAUDE.md   # 名前・memoryシステムが入っているか
+dir .\                        # フォルダが全部あるか（06_AppLaud, 07_タスク 含む）
+dir $HOME\.claude\hooks\      # 3つのPythonスクリプトがあるか
+Get-Content $HOME\.claude\CLAUDE.md   # 名前・SubAgent・A→B→C・vault-maintenanceトリガーが入っているか
 Get-Content .\03_私について\my_profile.md
 Get-Content .\07_タスク\MASTER_TASKS.md
-dir $HOME\.claude\projects\  # 作業フォルダに対応するプロジェクトフォルダがあるか
-Get-Content .\02_設定\.env    # 全4キーの行があるか（値は空でOK）
+dir $HOME\.claude\projects\   # 作業フォルダに対応するプロジェクトフォルダがあるか
+Get-Content .\02_設定\.env     # 全4キーの行があるか（値は空でOK）
+python .\02_設定\vault-maintenance.py index    # エラーなく動作するか
+dir .\claude_md_viewer.html, .\claude_md_rules.html, .\app_launcher.html, .\skill_list.md
 schtasks /query /tn "MyContext\ChatworkDailyDigest"   # タスクが登録されているか
 ```
+
+> **Windows のみ — 補足**: `open_claude.command` はMac専用のため存在しなくて正常です。
 
 ---
 
