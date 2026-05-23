@@ -511,7 +511,16 @@ if __name__ == "__main__":
 }
 ```
 
-> ▶ **Windows のみ — Stop フック**: `"command"` の値を `"python %USERPROFILE%\\.claude\\auto-save-context.py"` に変更してください（`2>/dev/null || true` はWindows非対応です）。
+> ▶ **Windows のみ**: すべての `command` パスを **フォワードスラッシュ（`/`）** で書いてください。バックスラッシュ（`\`）は JSON 内でエスケープ処理が壊れ、フックが動作しません。
+>
+> | Mac（そのまま） | Windows（要変更） |
+> |---|---|
+> | `python3 ~/.claude/hooks/user-prompt-save.py` | `python C:/Users/[ユーザー名]/.claude/hooks/user-prompt-save.py` |
+> | `python3 ~/.claude/hooks/block-api-key-output.py` | `python C:/Users/[ユーザー名]/.claude/hooks/block-api-key-output.py` |
+> | `python3 ~/.claude/hooks/detect-secrets.py` | `python C:/Users/[ユーザー名]/.claude/hooks/detect-secrets.py` |
+> | `python3 ~/.claude/auto-save-context.py 2>/dev/null \|\| true` | `python C:/Users/[ユーザー名]/.claude/auto-save-context.py` |
+>
+> ※ `[ユーザー名]` は実際のWindowsユーザー名に置き換えてください（`echo %USERNAME%` で確認できます）。
 
 ---
 
@@ -720,6 +729,9 @@ Write-Host "✅ タスクスケジューラーに登録しました"
 
 ```python
 #!/usr/bin/env python3
+import sys, io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 """
 MyContext pipeline.py
 AppLaudの出力（./06_AppLaud/）を読み取り、
@@ -792,6 +804,9 @@ if __name__ == "__main__":
 
 ```python
 #!/usr/bin/env python3
+import sys, io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 """
 vault-maintenance.py
 04_ナレッジ/切り抜き/ のMarkdown記事をGemini APIでWiki知識ページに変換し、
@@ -1143,6 +1158,9 @@ metadata:
 
 ```python
 #!/usr/bin/env python3
+import sys, io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 """
 extract_tasks.py
 AppLaudの出力（./06_AppLaud/）からタスクを抽出し、
