@@ -7,8 +7,10 @@ import tempfile
 import shutil
 import re  # For filename sanitization
 
-import google.generativeai as genai
+from google import genai
 from pydub import AudioSegment
+
+GEMINI_MODEL = "gemini-flash-latest"
 
 
 def _load_env(path):
@@ -30,13 +32,30 @@ _script_dir = pathlib.Path(__file__).parent
 _env_path = _script_dir.parent.parent / "02_設定" / ".env"
 _load_env(_env_path)
 
+class GeminiQuotaExceeded(Exception):
+    """Gemini API 429（無料枠上限超過）を示す例外。"""
+    pass
+
+
+def _raise_if_quota_error(exc):
+    """429 / RESOURCE_EXHAUSTED エラーなら GeminiQuotaExceeded を送出する。"""
+    msg = str(exc)
+    if (
+        "429" in msg
+        or "RESOURCE_EXHAUSTED" in msg.upper()
+        or "quota" in msg.lower()
+        or type(exc).__name__ in ("ResourceExhausted", "TooManyRequests")
+    ):
+        raise GeminiQuotaExceeded(msg) from exc
+
+
 # Constants
 CHUNK_MAX_DURATION_MS = 20 * 60 * 1000  # 20 minutes in milliseconds
 OVERLAP_MS = 1 * 60 * 1000  # 1 minute in milliseconds
 MAX_FILENAME_LENGTH = 50  # Max length for the AI generated part of the filename
 
 
-def generate_filename_from_summary(model, summary_text):
+def generate_filename_from_summary(client, summary_text):
     """Generates a filename suggestion from the summary text using Gemini API."""
     print("Generating filename from summary...")
     prompt = (
@@ -48,15 +67,16 @@ def generate_filename_from_summary(model, summary_text):
         f"\n\n作成ファイル名:"
     )
     try:
-        response = model.generate_content(prompt)
-        if response.candidates and response.candidates[0].content.parts:
-            suggested_name = response.candidates[0].content.parts[0].text.strip()
+        response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+        if response.text:
+            suggested_name = response.text.strip()
             print(f"API suggested filename: {suggested_name}")
             return suggested_name
         else:
             print("Warning: Filename generation returned no suggestion.")
             return None
     except Exception as e:
+        _raise_if_quota_error(e)
         print(f"Error during filename generation: {e}")
         return None
 
@@ -84,23 +104,31 @@ def sanitize_filename(filename_suggestion, max_length=MAX_FILENAME_LENGTH):
     return text
 
 
-def transcribe_chunk(model, audio_chunk_path, transcription_output_path):
+def transcribe_chunk(client, audio_chunk_path, transcription_output_path):
     """Uploads a single audio chunk, transcribes it, and saves the transcription."""
     print(f"Uploading chunk: {audio_chunk_path}...")
-    audio_file_part = genai.upload_file(path=audio_chunk_path)
+    try:
+        audio_file_part = client.files.upload(file=audio_chunk_path)
+    except Exception as e:
+        _raise_if_quota_error(e)
+        raise
     print(f"Completed upload: {audio_file_part.name}")
 
     print(f"Transcribing chunk {audio_file_part.name}...")
-    response = model.generate_content(
-        ["この音声ファイルを文字起こししてください。", audio_file_part]
-    )
+    try:
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=["この音声ファイルを文字起こししてください。", audio_file_part],
+        )
+    except Exception as e:
+        client.files.delete(name=audio_file_part.name)
+        _raise_if_quota_error(e)
+        raise
     print(f"Deleting uploaded chunk from API: {audio_file_part.name}")
-    genai.delete_file(audio_file_part.name)  # Delete from GenAI service
+    client.files.delete(name=audio_file_part.name)  # Delete from GenAI service
 
-    transcription_text = ""
-    if response.candidates and response.candidates[0].content.parts:
-        transcription_text = response.candidates[0].content.parts[0].text
-    else:
+    transcription_text = response.text or ""
+    if not transcription_text:
         print(f"Warning: Transcription for chunk {audio_chunk_path} returned no text.")
 
     # Save transcription to file
@@ -118,7 +146,7 @@ def transcribe_chunk(model, audio_chunk_path, transcription_output_path):
     return transcription_text
 
 
-def transcribe_audio(model, audio_file_path, temp_chunk_dir_path):
+def transcribe_audio(client, audio_file_path, temp_chunk_dir_path):
     """
     Handles audio transcription, including splitting long files into chunks
     with overlap, transcribing each chunk, and managing temporary files for reuse.
@@ -153,17 +181,27 @@ def transcribe_audio(model, audio_file_path, temp_chunk_dir_path):
                 return f.read()
         print("Audio is short enough, transcribing directly.")
         print(f"Uploading file: {audio_file_path}...")
-        audio_file_full = genai.upload_file(path=audio_file_path)
+        try:
+            audio_file_full = client.files.upload(file=audio_file_path)
+        except Exception as e:
+            _raise_if_quota_error(e)
+            raise
         print(f"Completed upload: {audio_file_full.name}")
 
         print("Transcribing audio...")
-        response = model.generate_content(
-            ["この音声ファイルを文字起こししてください。", audio_file_full]
-        )
+        try:
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=["この音声ファイルを文字起こししてください。", audio_file_full],
+            )
+        except Exception as e:
+            client.files.delete(name=audio_file_full.name)
+            _raise_if_quota_error(e)
+            raise
         print(f"Deleting uploaded file from API: {audio_file_full.name}")
-        genai.delete_file(audio_file_full.name)
-        if response.candidates and response.candidates[0].content.parts:
-            transcription = response.candidates[0].content.parts[0].text
+        client.files.delete(name=audio_file_full.name)
+        if response.text:
+            transcription = response.text
             # キャッシュとして保存
             try:
                 with open(short_transcription_cache, "w", encoding="utf-8") as f:
@@ -225,12 +263,12 @@ def transcribe_audio(model, audio_file_path, temp_chunk_dir_path):
                     )
                     # Fall through to transcribe if reading fails
                     transcription_part = transcribe_chunk(
-                        model, chunk_audio_file_path, chunk_transcription_file_path
+                        client, chunk_audio_file_path, chunk_transcription_file_path
                     )
             else:
                 print(f"Transcribing chunk {chunk_id}: {chunk_audio_file_path}")
                 transcription_part = transcribe_chunk(
-                    model, chunk_audio_file_path, chunk_transcription_file_path
+                    client, chunk_audio_file_path, chunk_transcription_file_path
                 )
 
             all_transcriptions.append(transcription_part)
@@ -246,13 +284,17 @@ def transcribe_audio(model, audio_file_path, temp_chunk_dir_path):
         return full_transcription  # Temporary chunk files are cleaned up by main
 
 
-def summarize_text(model, text, prompt_template):
+def summarize_text(client, text, prompt_template):
     """Summarizes the given text using the provided prompt template."""
     print("Summarizing text...")
     prompt = prompt_template.replace("{{TRANSCRIPTION}}", text)
-    response = model.generate_content(prompt)
-    if response.candidates and response.candidates[0].content.parts:
-        return response.candidates[0].content.parts[0].text
+    try:
+        response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+    except Exception as e:
+        _raise_if_quota_error(e)
+        raise
+    if response.text:
+        return response.text
     else:
         raise ValueError("Summarization failed or returned an empty response.")
 
@@ -334,8 +376,7 @@ def main():
             )
         return
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-3-flash-preview")
+    client = genai.Client(api_key=api_key)
 
     processing_dir = pathlib.Path(args.audio_processing_dir)
     markdown_output_dir = pathlib.Path(args.markdown_output_dir)
@@ -398,10 +439,20 @@ def main():
             transcription = None
             try:
                 transcription = transcribe_audio(
-                    model,
+                    client,
                     original_audio_path,
                     temp_chunk_processing_dir if cleanup_temp_dir_on_success else None,
                 )
+            except GeminiQuotaExceeded as e:
+                print(f"\n[QUOTA EXCEEDED] Gemini API 429 を検知 — 残りのファイルを温存して停止します。")
+                log_processed_file(
+                    processed_log_file_path,
+                    original_audio_filename,
+                    None,
+                    "quota_exceeded",
+                    str(e),
+                )
+                break
             except Exception as e:
                 print(f"Error during transcription for {original_audio_filename}: {e}")
                 log_processed_file(
@@ -415,8 +466,8 @@ def main():
                 continue
 
             try:
-                summary = summarize_text(model, transcription, prompt_template)
-                suggested_filename_base = generate_filename_from_summary(model, summary)
+                summary = summarize_text(client, transcription, prompt_template)
+                suggested_filename_base = generate_filename_from_summary(client, summary)
                 sanitized_filename_base = sanitize_filename(suggested_filename_base)
 
                 # Get audio file creation date
@@ -469,6 +520,16 @@ def main():
                             f"Warning: Failed to remove temporary chunk directory {temp_chunk_processing_dir}: {e}"
                         )
 
+            except GeminiQuotaExceeded as e:
+                print(f"\n[QUOTA EXCEEDED] Gemini API 429 を検知 — 残りのファイルを温存して停止します。")
+                log_processed_file(
+                    processed_log_file_path,
+                    original_audio_filename,
+                    output_markdown_filename,
+                    "quota_exceeded",
+                    str(e),
+                )
+                break
             except Exception as e:
                 error_msg = f"Error summarizing {original_audio_filename}: {e}"
                 print(error_msg)
@@ -485,6 +546,16 @@ def main():
                 # Continue to the next file
                 continue
 
+        except GeminiQuotaExceeded as e:
+            print(f"\n[QUOTA EXCEEDED] Gemini API 429 を検知 — 残りのファイルを温存して停止します。")
+            log_processed_file(
+                processed_log_file_path,
+                original_audio_filename,
+                output_markdown_filename,
+                "quota_exceeded",
+                str(e),
+            )
+            break
         except Exception as e:
             error_msg = f"Unhandled error processing {original_audio_filename}: {e}"
             print(error_msg)
@@ -500,8 +571,11 @@ def main():
             )
             # Continue to the next file
             continue
+    else:
+        print("\nAll files processed.")
+        return
 
-    print("\nAll files processed.")
+    print("\n処理を中断しました。429 が解消されたら再実行すると残りのファイルから再開します。")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
-google-generativeai
+google-genai
 pydub
+audioop-lts; python_version >= "3.13"
 psutil
