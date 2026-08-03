@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys, io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 """
 watch_usb.py — AppLaud Windows USB監視スクリプト
 launchd + .plist の代替。
@@ -54,12 +54,11 @@ def get_removable_drives() -> set[str]:
                 or partition.fstype.upper() in ("FAT", "FAT32", "EXFAT")
             )
         else:
-            # Mac: リムーバブルドライブは /Volumes/ 以下にマウントされる
-            # /Volumes/Macintosh HD など内蔵ドライブを除外するため local フラグを確認
+            # Mac: 外付けドライブは /Volumes/<name> にマウントされる
+            # 内蔵ドライブは / または /System/Volumes/ 以下なので除外不要
             is_removable = (
                 mountpoint.startswith("/Volumes/")
                 and mountpoint != "/Volumes/"
-                and "local" not in opts
             )
 
         if is_removable:

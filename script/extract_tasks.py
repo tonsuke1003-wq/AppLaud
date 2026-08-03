@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import sys, io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 """
 extract_tasks.py
 AppLaudの出力（./06_AppLaud/）からタスクを抽出し、
@@ -59,7 +62,7 @@ def extract_tasks_with_gemini(text: str, api_key: str) -> list[str]:
         "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.2},
     }, ensure_ascii=False).encode("utf-8")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={api_key}"
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=30) as res:

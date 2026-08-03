@@ -35,12 +35,19 @@ from config import (
 
 
 def find_audio_files(search_path: Path) -> list[Path]:
-    audio_files = []
+    seen: set[Path] = set()
+    result: list[Path] = []
     for ext in TARGET_EXTENSIONS:
-        audio_files.extend(search_path.rglob(f"*{ext}"))
-        audio_files.extend(search_path.rglob(f"*{ext.upper()}"))
-    # ._xxx のような隠しファイルを除外（Mac互換ファイルなど）
-    return [f for f in audio_files if not f.name.startswith("._")]
+        for pattern in (f"*{ext}", f"*{ext.upper()}"):
+            for f in search_path.rglob(pattern):
+                # 大文字小文字を区別しないFSでの重複 & Mac隠しファイルを除外
+                if f.name.startswith("._"):
+                    continue
+                key = f.resolve()
+                if key not in seen:
+                    seen.add(key)
+                    result.append(f)
+    return result
 
 
 def main():
@@ -65,6 +72,9 @@ def main():
     else:
         print(f"エラー: パスが30秒以内に利用可能になりませんでした: {search_path}")
         sys.exit(1)
+
+    # FAT filesystem はディレクトリ確認後もファイル一覧の確定に遅延があるため少し待つ
+    time.sleep(2)
 
     # 音声ファイルを検索
     audio_files = find_audio_files(search_path)
