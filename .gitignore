@@ -1,6 +1,10 @@
 # Temporary files
 debug_outputs/find_results.txt
 .tmp_chunks/
+__pycache__/
+
+# Claude Codeセッションの会話ログ（プライベート情報のため公開リポジトリに含めない）
+05_日記/
 
 # Processed files and sensitive information
 debug/processed_audio/
