@@ -3,18 +3,61 @@
 
 ---
 
-## Step 0: OSを確認する（自動分岐の準備）
+## Step 0: 前提チェックとOS確認【共通】
 
-以下を実行してOSを確認してください：
+**ここで足りないものがあると、後半のステップで必ず失敗します。**
+先に全部そろえてから Step 1 へ進んでください。
 
-python3 -c "import platform; print(platform.system())"
+### 0-1: OSを判定する
 
-出力を確認してください：
-- `Darwin`  → **Mac** として以降を実行
-- `Windows` → **Windows** として以降を実行
+あなた（Claude Code）は、起動時に実行環境のOSを把握しています。**まずそれを1行で宣言してください。**
+そのうえで、裏を取るために次のどちらかを実行します：
+
+- Macだと思う場合: `uname -s` → `Darwin` と出れば **Mac**
+- Windowsだと思う場合: `cmd /c ver` → `Microsoft Windows [Version ...]` と出れば **Windows**
+
+> **OS判定に `python3` を使わないでください。**
+> Windows では `python3` が Microsoft Store のスタブに割り当てられていることがあり、
+> 何も出力せずに終了したり、ストアのページが開いたりして判定に失敗します。
 
 以降、`▶ Mac のみ` と書かれたセクションはMacのみ実行、`▶ Windows のみ` はWindowsのみ実行してください。
 それ以外のセクションは **両OS共通** です。
+
+### 0-2: 前提ツールをチェックする
+
+> ▶ **Mac のみ**:
+> ```bash
+> echo "--- 前提チェック ---"
+> command -v git     >/dev/null && echo "✅ git     $(git --version)"     || echo "❌ git 未導入 → xcode-select --install"
+> command -v python3 >/dev/null && echo "✅ python3 $(python3 --version)" || echo "❌ python3 未導入 → https://www.python.org/downloads/"
+> command -v claude  >/dev/null && echo "✅ claude  $(claude --version)"  || echo "❌ claude CLI が PATH にない"
+> command -v ffmpeg  >/dev/null && echo "✅ ffmpeg  導入済み"             || echo "⚠️ ffmpeg 未導入 → brew install ffmpeg（Step 8で必要）"
+> python3 -c "import sys; v=sys.version_info; print('✅ Python %d.%d はOK' % v[:2]) if v >= (3,10) else print('❌ Python 3.10以上が必要（現在 %d.%d）' % v[:2])"
+> ```
+
+> ▶ **Windows のみ**:
+> ```powershell
+> Write-Host "--- 前提チェック ---"
+> foreach ($t in @("git","python","claude","ffmpeg")) {
+>     $c = Get-Command $t -ErrorAction SilentlyContinue
+>     if ($c) { Write-Host "OK   $t : $($c.Source)" } else { Write-Host "NG   $t が見つかりません" }
+> }
+> python -c "import sys; v=sys.version_info; print('OK   Python %d.%d' % v[:2]) if v >= (3,10) else print('NG   Python 3.10以上が必要')"
+> ```
+
+**❌ / NG が1つでも出たら、そのツールを先に導入してください。**
+
+| ツール | 用途 | 無いとどうなるか |
+|---|---|---|
+| git | Step 8 で AppLaud をクローンする | Step 8 で停止 |
+| python | ほぼ全ステップ | Step 5 以降が全滅 |
+| claude CLI | 完成後の起動 | セットアップは通るが使えない |
+| ffmpeg | mp3/m4a の音声処理 | **セットアップは成功し、録音を挿した日に初めて失敗する** |
+
+> ▶ **Windows のみ**: `python` が反応せず Microsoft Store が開く場合は、
+> Pythonランチャー `py` を試してください（`py --version`）。
+> それでもダメなら [python.org](https://www.python.org/downloads/) からインストールし、
+> インストーラの **「Add python.exe to PATH」に必ずチェック**を入れてください。
 
 ---
 
@@ -42,16 +85,42 @@ python3 -c "import platform; print(platform.system())"
 
 ---
 
-## Step 2: .env ファイルを作成する【共通】
+## Step 2: .env と .gitignore を作成する【共通】
+
+### 2-1: .env
 
 `./02_設定/.env` を作成してください。
-内容は以下のみ（値は私があとでエディタで直接入力します）：
+内容は以下のみ（`GEMINI_MODEL` 以外の値は私があとでエディタで直接入力します）：
 
 ```
 GEMINI_API_KEY=
+GEMINI_MODEL=gemini-flash-latest
 CW_TOKEN=
 CW_NOTIFY_TOKEN=
 CW_TARGET_ROOM=
+```
+
+> **`GEMINI_MODEL` は「常に最新のFlash」を指すエイリアスです。**
+> 全スクリプトがこの1行だけを参照するので、モデルを差し替えたくなったらここを書き換えるだけで済みます。
+> プレビュー版のモデルID（`*-preview`）を各スクリプトに直書きすると、提供終了と同時に全部まとめて止まります。
+
+### 2-2: .gitignore【必須・スキップ禁止】
+
+`.env` には APIキーが入ります。作業フォルダをGitで管理した瞬間に流出するので、
+**`.env` を作ったらすぐ** `./.gitignore` を作成してください：
+
+```
+# APIキー（絶対にコミットしない）
+02_設定/.env
+
+# 会話ログ・音声・日記（プライベート情報）
+05_日記/
+06_AppLaud/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
 ```
 
 ---
@@ -111,10 +180,23 @@ my_profile.mdの形式：
 
 ---
 
-## Step 4: CLAUDE.md を作成する（グローバル）【共通】
+## Step 4: CLAUDE.md を2枚作成する【共通】
 
-~/.claude/CLAUDE.md を作成してください。
-【重要】既存のファイルがある場合は上書きせず、末尾に追記する形にしてください。
+CLAUDE.md は**2層に分けます**：
+
+| ファイル | 読まれるタイミング | 何を書くか |
+|---|---|---|
+| `~/.claude/CLAUDE.md`（グローバル） | **どのフォルダで claude を起動しても必ず** | 人格・GREEN/YELLOW/RED・A→B→C・memoryルールなど**場所に依存しない**ルール |
+| `[作業フォルダ]/CLAUDE.md`（プロジェクト） | この作業フォルダで起動したときだけ | トリガーワード表・フォルダ構成・`./02_設定/` などの**相対パスを含む**ルール |
+
+> **なぜ分けるのか**: グローバルCLAUDE.mdは全プロジェクトで読まれます。
+> ここに `./07_タスク/MASTER_TASKS.md` のような相対パスを書いてしまうと、
+> 別のフォルダで claude を起動したときに、存在しないパスを指示し続けることになります。
+
+### 4-1: ~/.claude/CLAUDE.md（グローバル）
+
+【重要】既存のファイルがある場合は上書きせず、末尾に追記してください。
+**すでに `## [AI名] — ` の見出しが存在する場合は、2回目の実行なので追記せず、差分だけ反映してください**（追記すると内容が二重化します）。
 
 以下の内容をそのまま書き込んでください。
 [あなたの名前] の部分はStep3で聞いた名前に置き換えてください。
@@ -125,16 +207,17 @@ my_profile.mdの形式：
 
 - このClaudeは**[AI名]**として動作する（オーナー: [あなたの名前]）
 - ミッション: **Claudeが作業を担い、[あなたの名前]は承認のみ**。手間最小化・自動化を最優先
-- プロフィール参照: `./03_私について/my_profile.md`（Claude Codeの作業フォルダ基準）
+- MyContextの作業フォルダで起動したときは、そのフォルダの `./CLAUDE.md` に
+  プロフィール・トリガーワード・各スクリプトのパスが書いてある
 
 ---
 
 ## 行動原則
 
-- **削除禁止** → 必ず `00_ゴミ箱/` に移動
+- **削除禁止** → ゴミ箱フォルダへ移動する（移動先は各プロジェクトの CLAUDE.md 参照）
 - 不可逆操作（外部公開・決済・外部API送信）は確認なしに実行しない
 - secrets/APIキー → コードに書かない・環境変数使用（.envを参照）
-- .envのパス: `./02_設定/.env`（作業フォルダ基準）
+- `.env` を扱う前に、必ず `.gitignore` に入っているか確認する
 
 ---
 
@@ -165,42 +248,29 @@ my_profile.mdの形式：
 
 ---
 
-## ナレッジベース — トリガーワード
-
-| 言葉 | 動作 |
-|---|---|
-| 「タスク見せて」「やること」「進捗」 | MASTER_TASKS.mdを読んで現状報告 |
-| 「全部やって」「片付けて」 | MASTER_TASKSのREDを除く全タスクを自律実行 |
-| 「クリップ」+ 何か | `04_ナレッジ/切り抜き/` にMarkdownで保存 |
-| URL貼るだけ | 記事取得 → `04_ナレッジ/切り抜き/` に自動保存 |
-| 「まとめて」 | `04_ナレッジ/切り抜き/` の未整理素材 → `04_ナレッジ/情報源/` にWiki化 |
-| 「〇〇を開いて」 | openコマンドで該当ファイル/フォルダを開く |
-| 「AppLaudからタスク抽出」「AppLaudのタスクをMASTERに入れて」 | `python3 ./AppLaud/script/extract_tasks.py` を実行してMASTER_TASKS.mdを更新 |
-| 「AppLaud確認して」「AppLaud動いてる？」「音声メモ確認」 | AppLaud処理済みログ確認・未処理ファイル確認・最新要約確認を実行して報告 |
-| 「AppLaud手動実行」「音声を処理して」「録音を処理して」 | `./AppLaud/` 内の未処理ファイルを手動で処理 |
-| 「AppLaud最新の要約見せて」「最後のAppLaud何の話だった？」 | `./06_AppLaud/` の最新MDファイルを読んで内容を報告 |
-| 「AppLaudが止まってる」「音声処理が止まってる」 | `.tmp_chunks`確認→stale削除→再実行で自律復旧 |
-| 「記事を知識にまとめて」「保存した記事を整理して」 | `python3 ./02_設定/vault-maintenance.py compile` を実行 |
-| 「知識ページをチェックして」「ナレッジ古くなってない？」 | `python3 ./02_設定/vault-maintenance.py lint` を実行 |
-| 「知識一覧更新して」「まとめ一覧を作り直して」 | `python3 ./02_設定/vault-maintenance.py index` を実行 |
-| 「メモリ見せて」「記憶一覧」 | `~/.claude/projects/[カレントプロジェクトハッシュ]/memory/MEMORY.md` を読んで一覧表示 |
-| 「〇〇を覚えておいて」「〇〇を記憶して」 | memoryフォルダに適切なタイプで保存し、MEMORY.mdに追記 |
-| 「〇〇を忘れて」 | 該当memoryファイルを削除またはMEMORY.mdから除去 |
-
----
-
 ## サブエージェント ルーティング
 
 「レビューして」「サブエージェントでチェックして」と言われたら、直前の作業に合わせて最適なエージェントを起動する。
 
-| 直前の作業 | 起動するエージェント |
-|---|---|
-| Pythonコード | `python-reviewer` |
-| TypeScript / JavaScriptコード | `typescript-reviewer` |
-| その他コード・汎用 | `code-reviewer` |
-| DB設計・SQLクエリ | `database-reviewer` |
-| システム設計・技術選定 | `architect` |
-| セキュリティ懸念あり | `security-reviewer` |
+**この表には実在するエージェント名しか書かないこと。** 存在しない名前を指定すると、
+Claudeは黙って汎用エージェントにフォールバックする。レビュー結果は返ってくるので、
+「指定した専門エージェントが動いていない」ことに誰も気づけない。
+
+| 直前の作業 | 起動するエージェント | 出どころ |
+|---|---|---|
+| コード全般のレビュー | `code-reviewer` | pr-review-toolkit |
+| エラーの握りつぶし・失敗の見落とし | `silent-failure-hunter` | pr-review-toolkit |
+| テストの過不足 | `pr-test-analyzer` | pr-review-toolkit |
+| 型設計・データ構造 | `type-design-analyzer` | pr-review-toolkit |
+| コメントの質 | `comment-analyzer` | pr-review-toolkit |
+| 冗長なコードの整理 | `code-simplifier` | pr-review-toolkit |
+| 設計・方針の検討 | `Plan` | Claude Code 組み込み |
+| コードの場所を横断的に探す | `Explore` | Claude Code 組み込み |
+| セキュリティ | `/security-review`（スキル） | Claude Code 組み込み |
+
+> **Python専用・TypeScript専用・DB専用のレビューエージェントは存在しない。**
+> 言語を問わず `code-reviewer` が担当する。
+> PR全体をまとめてレビューしたい時は `/review-pr` を使う。
 
 ---
 
@@ -286,6 +356,68 @@ metadata:
 
 - `.env` から読み込む（ハードコード禁止）
 - 送信時は必ず `CW_NOTIFY_TOKEN` を使う
+```
+
+---
+
+### 4-2: [作業フォルダ]/CLAUDE.md（プロジェクト）
+
+作業フォルダ直下に `./CLAUDE.md` を作成してください。
+**相対パスを含むルールはすべてこちらに置きます**（このフォルダで起動したときだけ読まれるため）。
+[AI名] は 4-1 で決めた名前に置き換えてください。
+
+```markdown
+# MyContext — このフォルダのルール
+
+> このファイルは、この作業フォルダで Claude Code を起動したときだけ読み込まれる。
+> AIの人格・GREEN/YELLOW/RED・A→B→C などの共通ルールは `~/.claude/CLAUDE.md` 側にある。
+
+## このフォルダのパス
+
+- プロフィール: `./03_私について/my_profile.md`
+- 設定・APIキー: `./02_設定/.env`（**`.gitignore` 済み。中身をチャットに出力しない**）
+- 削除禁止 → 消さずに `./00_ゴミ箱/` へ移動する
+- Geminiのモデル名は `./02_設定/.env` の `GEMINI_MODEL` を唯一の情報源とする
+  （スクリプトにモデルIDを直書きしない）
+- AppLaud関連スクリプトは **`.venv` のPython** で実行する
+  （Mac: `./.venv/bin/python` / Windows: `.\.venv\Scripts\python.exe`）
+
+## フォルダ構成
+
+| フォルダ | 用途 |
+|---|---|
+| `00_ゴミ箱/` | 削除の代わりに移動する先 |
+| `01_事業・クライアント/` | 案件ごとの資料 |
+| `02_設定/` | .env・pipeline.py・vault-maintenance.py・chatwork-daily-digest.py |
+| `03_私について/` | my_profile.md（AIが参照する自己紹介） |
+| `04_ナレッジ/` | `切り抜き/`（未整理素材） → `情報源/`（Wiki化済み） |
+| `05_日記/` | 日報・`チャットログ/` |
+| `06_AppLaud/` | 音声メモの文字起こし・要約の出力先 |
+| `07_タスク/` | MASTER_TASKS.md |
+
+## ナレッジベース — トリガーワード
+
+| 言葉 | 動作 |
+|---|---|
+| 「タスク見せて」「やること」「進捗」 | MASTER_TASKS.mdを読んで現状報告 |
+| 「全部やって」「片付けて」 | MASTER_TASKSのREDを除く全タスクを自律実行 |
+| 「クリップ」+ 何か | `04_ナレッジ/切り抜き/` にMarkdownで保存 |
+| URL貼るだけ | 記事取得 → `04_ナレッジ/切り抜き/` に自動保存 |
+| 「まとめて」 | `04_ナレッジ/切り抜き/` の未整理素材 → `04_ナレッジ/情報源/` にWiki化 |
+| 「〇〇を開いて」 | openコマンドで該当ファイル/フォルダを開く |
+| 「AppLaudからタスク抽出」「AppLaudのタスクをMASTERに入れて」 | `python3 ./AppLaud/script/extract_tasks.py` を実行してMASTER_TASKS.mdを更新 |
+| 「AppLaud確認して」「AppLaud動いてる？」「音声メモ確認」 | AppLaud処理済みログ確認・未処理ファイル確認・最新要約確認を実行して報告 |
+| 「AppLaud手動実行」「音声を処理して」「録音を処理して」 | `./AppLaud/` 内の未処理ファイルを手動で処理 |
+| 「AppLaud最新の要約見せて」「最後のAppLaud何の話だった？」 | `./06_AppLaud/` の最新MDファイルを読んで内容を報告 |
+| 「AppLaudが止まってる」「音声処理が止まってる」 | `.tmp_chunks`確認→stale削除→再実行で自律復旧 |
+| 「記事を知識にまとめて」「保存した記事を整理して」 | `python3 ./02_設定/vault-maintenance.py compile` を実行 |
+| 「知識ページをチェックして」「ナレッジ古くなってない？」 | `python3 ./02_設定/vault-maintenance.py lint` を実行 |
+| 「知識一覧更新して」「まとめ一覧を作り直して」 | `python3 ./02_設定/vault-maintenance.py index` を実行 |
+| 「メモリ見せて」「記憶一覧」 | `~/.claude/projects/[カレントプロジェクトハッシュ]/memory/MEMORY.md` を読んで一覧表示 |
+| 「〇〇を覚えておいて」「〇〇を記憶して」 | memoryフォルダに適切なタイプで保存し、MEMORY.mdに追記 |
+| 「〇〇を忘れて」 | 該当memoryファイルを削除またはMEMORY.mdから除去 |
+
+---
 
 ---
 
@@ -339,11 +471,17 @@ def main():
     tool_input = data.get("tool_input", {})
     check_text = json.dumps(tool_input, ensure_ascii=False)
     if contains_api_key(check_text):
+        # 現行の PreToolUse スキーマ: stdout に hookSpecificOutput を出して exit 0。
+        # 旧 {"decision": "block"} + exit 2 は非推奨で、しかも exit 2 では stdout が
+        # 表示されないため「なぜ止まったか」が本人に伝わらない。
         print(json.dumps({
-            "decision": "block",
-            "reason": "⛔ APIキーが出力に含まれています。.envファイルを直接参照してください。"
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "⛔ APIキーが出力に含まれています。.envファイルを直接参照してください。"
+            }
         }, ensure_ascii=False))
-        sys.exit(2)
+        sys.exit(0)
     sys.exit(0)
 
 if __name__ == "__main__":
@@ -384,22 +522,33 @@ def main():
         sys.exit(0)
     tool_name = data.get("tool_name", "")
     tool_input = data.get("tool_input", {})
-    if tool_name not in ("Write", "Edit"):
+    # MultiEdit / NotebookEdit も検査対象に含める（漏れると素通りする）
+    if tool_name not in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         sys.exit(0)
     file_path = tool_input.get("file_path", "")
     if is_safe_file(file_path) or file_path.endswith(".env"):
         sys.exit(0)
-    content = tool_input.get("content", "") if tool_name == "Write" else tool_input.get("new_string", "")
+    if tool_name == "Write":
+        content = tool_input.get("content", "")
+    elif tool_name == "MultiEdit":
+        content = "\n".join(e.get("new_string", "") for e in tool_input.get("edits", []))
+    elif tool_name == "NotebookEdit":
+        content = tool_input.get("new_source", "")
+    else:
+        content = tool_input.get("new_string", "")
     findings = []
     for pattern, name in SECRET_PATTERNS:
         if re.search(pattern, content):
             findings.append(name)
     if findings:
         print(json.dumps({
-            "decision": "block",
-            "reason": f"シークレット漏洩の可能性: {', '.join(findings)}\nAPIキーは.envファイルに保存してください。"
-        }))
-        sys.exit(2)
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": f"シークレット漏洩の可能性: {', '.join(findings)}\nAPIキーは.envファイルに保存してください。"
+            }
+        }, ensure_ascii=False))
+        sys.exit(0)
     sys.exit(0)
 
 if __name__ == "__main__":
@@ -425,9 +574,13 @@ def main():
     if not message:
         sys.exit(0)
 
+    # このhookは全プロジェクトで発火する。cwd直下に無条件で 05_日記/ を作ると、
+    # 無関係なリポジトリに会話ログが生成され、そのままコミットされる事故になる。
+    # → 05_日記/ が既に在るフォルダ（＝MyContext作業フォルダ）でだけ保存する。
     cwd = data.get("cwd", "")
-    if cwd:
-        save_dir = Path(cwd) / "05_日記" / "チャットログ"
+    journal_dir = Path(cwd) / "05_日記" if cwd else None
+    if journal_dir is not None and journal_dir.is_dir():
+        save_dir = journal_dir / "チャットログ"
     else:
         save_dir = Path.home() / ".claude" / "chat_logs"
 
@@ -453,7 +606,10 @@ if __name__ == "__main__":
 
 ## Step 6: ~/.claude/settings.json を作成する（hooks有効化）【共通】
 
-【重要】既存のsettings.jsonがある場合は上書きせず、"hooks"キーだけ追記・マージしてください。
+【重要】既存のsettings.jsonがある場合は**上書き禁止**。次のルールでマージしてください：
+
+- `"permissions"` … **既存の設定があるなら一切触らない**（キー自体が無い場合だけ追加する）
+- `"hooks"` … 既存の同名イベントがあれば配列に追加。**同じ command が既にあれば重複登録しない**（2回目の実行対策）
 
 ```json
 {
@@ -484,7 +640,7 @@ if __name__ == "__main__":
         ]
       },
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
@@ -510,6 +666,11 @@ if __name__ == "__main__":
   }
 }
 ```
+
+> **⚠️ JSONが壊れると hooks は無言で全滅します（エラーも出ません）。** 書き込んだら必ず検証してください：
+>
+> - Mac: `python3 -m json.tool ~/.claude/settings.json > /dev/null && echo "✅ JSON OK"`
+> - Windows: `python -m json.tool $HOME\.claude\settings.json > $null; if ($?) { "✅ JSON OK" }`
 
 > ▶ **Windows のみ**: すべての `command` パスを **フォワードスラッシュ（`/`）** で書いてください。バックスラッシュ（`\`）は JSON 内でエスケープ処理が壊れ、フックが動作しません。
 >
@@ -601,8 +762,11 @@ def main():
     if not messages:
         return
 
-    if project_cwd:
-        save_dir = Path(project_cwd) / "05_日記" / "チャットログ"
+    # user-prompt-save.py と同じ理由で、05_日記/ が既に在るフォルダでだけ保存する。
+    # （会話全文を無関係なリポジトリに書き出さないため）
+    journal_dir = Path(project_cwd) / "05_日記" if project_cwd else None
+    if journal_dir is not None and journal_dir.is_dir():
+        save_dir = journal_dir / "チャットログ"
     else:
         save_dir = Path.home() / ".claude" / "chat_logs"
 
@@ -631,23 +795,65 @@ if __name__ == "__main__":
 
 ## Step 8: AppLaud をセットアップする【共通】
 
+### 8-1: クローン
+
 作業フォルダ内に AppLaud をクローンします（Mac/Windows両対応のフォーク版）：
+
+> ▶ **Mac のみ**: `git clone https://github.com/tonsuke1003-wq/AppLaud.git ./AppLaud`
+
+> ▶ **Windows のみ**: `git clone https://github.com/tonsuke1003-wq/AppLaud.git ./AppLaud`
+
+### 8-2: 仮想環境（.venv）を作って依存パッケージを入れる
+
+【重要】`pip3 install` をシステムのPythonへ直接実行すると、最近のMacでは
+`error: externally-managed-environment` で**必ず失敗します**（PEP 668）。
+**作業フォルダ直下に `.venv` を作り、AppLaud関連はすべてそのPythonで動かします。**
 
 > ▶ **Mac のみ**:
 > ```bash
-> git clone https://github.com/tonsuke1003-wq/AppLaud.git ./AppLaud
-> pip3 install -r ./AppLaud/requirements.txt
+> python3 -m venv .venv
+> ./.venv/bin/python -m pip install --upgrade pip
+> ./.venv/bin/python -m pip install -r ./AppLaud/requirements.txt
+> ./.venv/bin/python -c "import google.genai, pydub, psutil; print('✅ 依存パッケージOK')"
 > ```
-> mp3/m4a処理に ffmpeg が必要です（未インストールの場合: `brew install ffmpeg`）
 
 > ▶ **Windows のみ**:
 > ```powershell
-> git clone https://github.com/tonsuke1003-wq/AppLaud.git ./AppLaud
-> pip install -r .\AppLaud\requirements.txt
+> python -m venv .venv
+> .\.venv\Scripts\python.exe -m pip install --upgrade pip
+> .\.venv\Scripts\python.exe -m pip install -r .\AppLaud\requirements.txt
+> .\.venv\Scripts\python.exe -c "import google.genai, pydub, psutil; print('OK')"
 > ```
-> mp3/m4a処理に ffmpeg が必要です（[ffmpeg.org](https://ffmpeg.org/download.html) からインストールし PATH へ追加）
 
-次に `./AppLaud/script/config.py` を開いて設定を確認してください：
+> **以降、AppLaud を動かすときは必ず `.venv` のPythonを使ってください。**
+> `python3` / `python` と打つとパッケージの入っていない別のPythonが動き、`ModuleNotFoundError` になります。
+>
+> | | .venv の Python |
+> |---|---|
+> | Mac | `./.venv/bin/python` |
+> | Windows | `.\.venv\Scripts\python.exe` |
+>
+> ※ `~/.claude/hooks/` の3本と `02_設定/` の3本は**標準ライブラリだけ**で動くので、
+> 　`python3` / `python` のままで構いません（グローバル設定を特定プロジェクトのvenvに依存させないための設計です）。
+
+### 8-3: ffmpeg（必須）
+
+mp3/m4a の処理に ffmpeg が必要です。**未導入でも今日は何も起きず、録音を挿した日に初めて失敗します。**
+必ずこの場で確認してください。
+
+> ▶ **Mac のみ**:
+> ```bash
+> ffmpeg -version >/dev/null 2>&1 && echo "✅ ffmpeg OK" || echo "❌ 未インストール → brew install ffmpeg"
+> ```
+
+> ▶ **Windows のみ**:
+> ```powershell
+> if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { "✅ ffmpeg OK" } else { "❌ 未インストール → https://ffmpeg.org/download.html からインストールしPATHへ追加" }
+> ```
+
+### 8-4: config.py の確認
+
+`./AppLaud/script/config.py` を開いて設定を確認してください：
 
 ```python
 # ボイスレコーダーのドライブ/ボリューム（空文字列で全リムーバブルドライブを対象）
@@ -660,19 +866,21 @@ VOICE_FILES_SUBDIR = "RECORD"
 
 > APIキー（`GEMINI_API_KEY`）は `./02_設定/.env` から自動読み込みされます。`config.py` に直接書かないでください。
 
-USB監視を起動するには：
+### 8-5: 起動
 
-> ▶ **Mac のみ**: `python3 ./AppLaud/script/watch_usb.py`
+USB監視を起動するには（**必ず .venv のPython**）：
 
-> ▶ **Windows のみ**: `python .\AppLaud\script\watch_usb.py`
+> ▶ **Mac のみ**: `./.venv/bin/python ./AppLaud/script/watch_usb.py`
+
+> ▶ **Windows のみ**: `.\.venv\Scripts\python.exe .\AppLaud\script\watch_usb.py`
 
 ボイスレコーダーを接続すると自動で処理が開始されます（Ctrl+C で停止）。
 
 手動実行（接続済みドライブを即時処理）：
 
-> ▶ **Mac のみ**: `python3 ./AppLaud/script/watch_usb.py --once`
+> ▶ **Mac のみ**: `./.venv/bin/python ./AppLaud/script/watch_usb.py --once`
 
-> ▶ **Windows のみ**: `python .\AppLaud\script\watch_usb.py --once`
+> ▶ **Windows のみ**: `.\.venv\Scripts\python.exe .\AppLaud\script\watch_usb.py --once`
 
 **（上級）ログイン時に自動起動する場合：**
 
@@ -680,7 +888,8 @@ USB監視を起動するには：
 
 ```bash
 WORK_DIR=$(pwd)
-PYTHON_PATH=$(which python3)
+PYTHON_PATH="${WORK_DIR}/.venv/bin/python"   # ← システムのpython3ではなく .venv を指す
+if [ ! -x "$PYTHON_PATH" ]; then echo "❌ .venv が見つかりません。Step 8-2 を先に実行してください"; exit 1; fi
 
 cat > ~/Library/LaunchAgents/com.mycontext.applaud.plist << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -709,8 +918,13 @@ echo "✅ launchd に登録しました"
 ```powershell
 $workDir    = (Get-Location).Path
 $scriptPath = "$workDir\AppLaud\script\watch_usb.py"
-$pythonPath = (Get-Command python -ErrorAction SilentlyContinue)?.Source
-if (-not $pythonPath) { $pythonPath = (Get-Command python3).Source }
+
+# .venv のPythonを使う。pythonw.exe = 起動のたびに黒いコンソール窓が出ない
+$pythonPath = "$workDir\.venv\Scripts\pythonw.exe"
+if (-not (Test-Path $pythonPath)) {
+    Write-Error ".venv が見つかりません。Step 8-2 を先に実行してください"
+    exit 1
+}
 
 schtasks /create `
   /tn "AppLaud\WatchUSB" `
@@ -830,7 +1044,7 @@ BASE_DIR  = Path(__file__).parent.parent
 CLIPPINGS = BASE_DIR / "04_ナレッジ" / "切り抜き"
 SOURCES   = BASE_DIR / "04_ナレッジ" / "情報源"
 ENV_PATH  = BASE_DIR / "02_設定" / ".env"
-DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
+FALLBACK_GEMINI_MODEL = "gemini-flash-latest"   # .env に GEMINI_MODEL が無い場合だけ使う
 
 def load_env(path: Path) -> dict:
     env = {}
@@ -848,17 +1062,38 @@ def get_gemini_key() -> str:
     env = load_env(ENV_PATH)
     return env.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
 
-def gemini_generate(prompt: str, api_key: str, model: str = DEFAULT_GEMINI_MODEL) -> str:
+def get_gemini_model() -> str:
+    env = load_env(ENV_PATH)
+    return env.get("GEMINI_MODEL", "") or os.environ.get("GEMINI_MODEL", "") or FALLBACK_GEMINI_MODEL
+
+def extract_gemini_text(data: dict) -> str:
+    """Geminiのレスポンスから本文テキストを取り出す。
+
+    Gemini 3系は thinking がデフォルトで有効。parts[0] が思考パート（textキーなし）だったり、
+    出力上限に当たって text が1つも返らないことがあるため、
+    parts[0]["text"] の直参照は KeyError で落ちる。必ず全partsを走査する。
+    """
+    for cand in data.get("candidates", []):
+        parts = cand.get("content", {}).get("parts", []) or []
+        texts = [p["text"] for p in parts
+                 if isinstance(p, dict) and p.get("text") and not p.get("thought")]
+        if texts:
+            return "\n".join(texts).strip()
+        if cand.get("finishReason") == "MAX_TOKENS":
+            print("  ⚠️ 出力上限に到達（maxOutputTokensを増やしてください）", file=sys.stderr)
+    return ""
+
+def gemini_generate(prompt: str, api_key: str, model: str = "") -> str:
+    model = model or get_gemini_model()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     payload = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"maxOutputTokens": 4096, "temperature": 0.3},
+        "generationConfig": {"maxOutputTokens": 8192, "temperature": 0.3},
     }, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=60) as res:
-            data = json.load(res)
-            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            return extract_gemini_text(json.load(res))
     except Exception as e:
         print(f"  Gemini APIエラー: {e}", file=sys.stderr)
         return ""
@@ -1152,156 +1387,45 @@ metadata:
 
 ---
 
-## Step 12: AppLaud タスク抽出スクリプトを追加する【共通】
+## Step 12: AppLaud タスク抽出スクリプトを確認する【共通】
 
-`./AppLaud/script/extract_tasks.py` を作成してください。
+**このステップではファイルを作成しません。**
+`extract_tasks.py` は Step 8 でクローンしたリポジトリに**最新版が同梱されています**
+（`./AppLaud/script/extract_tasks.py`）。
 
-```python
-#!/usr/bin/env python3
-import sys, io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-"""
-extract_tasks.py
-AppLaudの出力（./06_AppLaud/）からタスクを抽出し、
-./07_タスク/MASTER_TASKS.md に追記する。
+> ⚠️ **絶対に上書きしないでください。**
+> リポジトリ側の `extract_tasks.py` は Gemini の新SDK・最新モデル名に更新済みです。
+> ここで古いコードを書き込むと修正が巻き戻り、さらに次回以降 `git pull` するたびに
+> コンフリクトして更新を受け取れなくなります。
 
-使い方: python3 ./AppLaud/script/extract_tasks.py
-"""
+存在確認と動作確認だけしてください：
 
-import os
-import re
-import sys
-import json
-from datetime import datetime
-from pathlib import Path
+> ▶ **Mac のみ**:
+> ```bash
+> ls -l ./AppLaud/script/extract_tasks.py
+> git -C ./AppLaud status --short        # 出力が空 = 上書きしていない（正常）
+> python3 ./AppLaud/script/extract_tasks.py
+> ```
 
-# スクリプト位置から自動でプロジェクトルートを決定
-# AppLaud/script/ → AppLaud/ → [作業フォルダ]/
-BASE_DIR    = Path(__file__).parent.parent.parent
-APPLAUD_DIR = BASE_DIR / "06_AppLaud"
-TASKS_FILE  = BASE_DIR / "07_タスク" / "MASTER_TASKS.md"
-ENV_PATH    = BASE_DIR / "02_設定" / ".env"
+> ▶ **Windows のみ**:
+> ```powershell
+> dir .\AppLaud\script\extract_tasks.py
+> git -C .\AppLaud status --short        # 出力が空 = 上書きしていない（正常）
+> python .\AppLaud\script\extract_tasks.py
+> ```
 
-def load_env(path: Path) -> dict:
-    env = {}
-    try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                env[k.strip()] = v.strip().strip('"').strip("'")
-    except Exception:
-        pass
-    return env
+`06_AppLaud/` にはまだ音声メモが無いので、
+**「直近24時間のAppLaudファイルが見つかりません」と表示されれば正常です**（エラーではありません）。
 
-def get_recent_applaud_files(days: int = 1) -> list[Path]:
-    if not APPLAUD_DIR.exists():
-        return []
-    files = sorted(APPLAUD_DIR.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
-    cutoff = datetime.now().timestamp() - (days * 86400)
-    return [f for f in files if f.stat().st_mtime >= cutoff]
-
-def extract_tasks_with_gemini(text: str, api_key: str) -> list[str]:
-    import urllib.request
-
-    prompt = f"""以下は音声メモの文字起こしです。
-この中から「タスク・やること・TODO」に相当するものをすべて抽出してください。
-【ルール】
-- 1行1タスクで出力
-- 箇条書き記号（- や ・）は不要。タスク本文だけ出力
-- タスクが見つからない場合は「タスクなし」と出力
-
-【文字起こし】
-{text[:3000]}
-"""
-
-    payload = json.dumps({
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.2},
-    }, ensure_ascii=False).encode("utf-8")
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={api_key}"
-    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as res:
-            data = json.load(res)
-            result = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-            return [] if result == "タスクなし" else [l.strip() for l in result.splitlines() if l.strip()]
-    except Exception as e:
-        print(f"  Gemini APIエラー: {e}", file=sys.stderr)
-        return []
-
-def extract_tasks_simple(text: str) -> list[str]:
-    task_keywords = ["する", "やる", "確認", "連絡", "送る", "作る", "調べる", "提出", "返信", "予約"]
-    tasks = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if re.match(r'^[・\-\*]|^TODO|^タスク', line):
-            tasks.append(re.sub(r'^[・\-\*\s]+', '', line))
-        elif len(line) < 50 and any(kw in line for kw in task_keywords):
-            tasks.append(line)
-    return tasks
-
-def append_tasks_to_master(tasks: list[str]) -> int:
-    if not tasks:
-        return 0
-    today = datetime.now().strftime("%Y-%m-%d")
-    TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    content = TASKS_FILE.read_text(encoding="utf-8") if TASKS_FILE.exists() else \
-        "# MASTER_TASKS.md — タスク管理\n\n## 🟡 優先度B（今月中）\n\n| # | タスク | 期限 | 状態 |\n|---|---|---|---|\n"
-    new_rows = [f"|   | {t}（AppLaud: {today}） |   | 📥 未着手 |" for t in tasks]
-    marker = "## 🟡 優先度B（今月中）"
-    if marker in content:
-        header_pos = content.find("| # | タスク | 期限 | 状態 |", content.find(marker))
-        if header_pos != -1:
-            sep_end = content.find("\n", content.find("\n", header_pos) + 1)
-            content = content[:sep_end + 1] + "\n".join(new_rows) + "\n" + content[sep_end + 1:]
-        else:
-            content += "\n" + "\n".join(new_rows) + "\n"
-    else:
-        content += f"\n{marker}\n\n| # | タスク | 期限 | 状態 |\n|---|---|---|---|\n" + "\n".join(new_rows) + "\n"
-    TASKS_FILE.write_text(content, encoding="utf-8")
-    return len(tasks)
-
-def main():
-    print("=== AppLaud → MASTER_TASKS 連携 ===")
-    env = load_env(ENV_PATH)
-    api_key = env.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
-    files = get_recent_applaud_files(days=1)
-    if not files:
-        print(f"直近24時間のAppLaudファイルが見つかりません: {APPLAUD_DIR}")
-        return
-    print(f"対象ファイル: {len(files)}件")
-    total_added = 0
-    for f in files:
-        print(f"\n処理中: {f.name}")
-        text = f.read_text(encoding="utf-8", errors="ignore")
-        tasks = extract_tasks_with_gemini(text, api_key) if api_key else extract_tasks_simple(text)
-        method = "Gemini" if api_key else "キーワード抽出"
-        if not tasks:
-            print(f"  タスクなし（{method}）")
-            continue
-        print(f"  抽出タスク ({method}): {len(tasks)}件")
-        for t in tasks:
-            print(f"    - {t}")
-        total_added += append_tasks_to_master(tasks)
-    if total_added > 0:
-        print(f"\n✅ MASTER_TASKS.mdに {total_added}件 追加しました: {TASKS_FILE}")
-    else:
-        print("\n追加されたタスクはありませんでした")
-
-if __name__ == "__main__":
-    main()
-```
-
-動作確認：
-
-> ▶ **Mac のみ**: `python3 ./AppLaud/script/extract_tasks.py`
-
-> ▶ **Windows のみ**: `python .\AppLaud\script\extract_tasks.py`
+> このスクリプトは `./06_AppLaud/` の要約を読み、`./07_タスク/MASTER_TASKS.md` に追記します。
+> CLAUDE.md の「AppLaudからタスク抽出」トリガーから呼ばれます。
+>
+> **重複防止つきです。** 「AppLaudからタスク抽出」を何度言っても同じタスクは増えません：
+> ① 処理済みの音声メモは `./07_タスク/.extract_tasks_state.json` に記録してスキップ
+> ② MASTER_TASKS.md に同じ文面が既にあるタスクは追加しない
+> 記録を無視して抽出し直したい場合だけ `--force` を付けて実行します。
+> 使用モデルは `./02_設定/.env` の `GEMINI_MODEL` を参照します（スクリプトへの直書きはしません）。
+> 標準ライブラリだけで動くので、`.venv` ではなく `python3` / `python` で実行して構いません。
 
 ---
 
@@ -1353,7 +1477,8 @@ CW_TOKEN        = _ENV.get("CW_TOKEN", "")        or os.environ.get("CW_TOKEN", 
 CW_NOTIFY_TOKEN = _ENV.get("CW_NOTIFY_TOKEN", "") or os.environ.get("CW_NOTIFY_TOKEN", "") or CW_TOKEN
 TARGET_ROOM     = _ENV.get("CW_TARGET_ROOM", "")  or os.environ.get("CW_TARGET_ROOM", "")
 GEMINI_API_KEY  = _ENV.get("GEMINI_API_KEY", "")  or os.environ.get("GEMINI_API_KEY", "")
-GEMINI_URL      = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
+GEMINI_MODEL    = _ENV.get("GEMINI_MODEL", "")    or os.environ.get("GEMINI_MODEL", "") or "gemini-flash-latest"
+GEMINI_URL      = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
 MASTER_TASKS = BASE_DIR / "07_タスク" / "MASTER_TASKS.md"
 JOURNAL_DIR  = BASE_DIR / "05_日記"
@@ -1435,6 +1560,19 @@ def read_recent_journals(n=2):
             continue
     return "\n\n".join(texts)
 
+def extract_gemini_text(data):
+    """Gemini 3系は thinking が有効で parts[0] に text が無い場合がある。
+    parts[0]["text"] 直参照は KeyError で落ちるため、全partsを走査する。"""
+    for cand in data.get("candidates", []):
+        parts = cand.get("content", {}).get("parts", []) or []
+        texts = [p["text"] for p in parts
+                 if isinstance(p, dict) and p.get("text") and not p.get("thought")]
+        if texts:
+            return "\n".join(texts).strip()
+        if cand.get("finishReason") == "MAX_TOKENS":
+            log("⚠️ 出力上限に到達（maxOutputTokensを増やしてください）")
+    return ""
+
 def generate_briefing(chatwork_summary, master_tasks, journals):
     today = datetime.now().strftime("%Y年%m月%d日（%A）")
     prompt = f"""あなたは専属のAIアシスタントです。今日は{today}です。
@@ -1458,15 +1596,14 @@ def generate_briefing(chatwork_summary, master_tasks, journals):
 
     payload = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"maxOutputTokens": 4096, "temperature": 0.7},
+        "generationConfig": {"maxOutputTokens": 8192, "temperature": 0.7},
     }, ensure_ascii=False).encode("utf-8")
 
     url = f"{GEMINI_URL}?key={GEMINI_API_KEY}"
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=60) as res:
-            data = json.load(res)
-            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            return extract_gemini_text(json.load(res)) or None
     except Exception as e:
         log(f"❌ Gemini APIエラー: {e}")
         return None
@@ -1539,16 +1676,25 @@ cat > ~/Library/LaunchAgents/com.mycontext.chatwork-digest.plist << EOF
     </dict>
     <key>StandardOutPath</key><string>/tmp/chatwork-digest.log</string>
     <key>StandardErrorPath</key><string>/tmp/chatwork-digest-err.log</string>
-    <key>RunAtLoad</key><true/>
 </dict>
 </plist>
 EOF
 
 launchctl load ~/Library/LaunchAgents/com.mycontext.chatwork-digest.plist
-echo "✅ launchd に登録しました（RunAtLoad=true: 起動時にも実行）"
+echo "✅ launchd に登録しました（毎朝5:00のみ実行）"
 ```
 
-手動テスト：
+> **`RunAtLoad` は意図的に外しています。**
+> 有効にすると、この登録コマンドを打った瞬間と、以後ログインするたびに
+> Chatworkへブリーフィングが送信されます（＝無確認の外部送信）。
+> CLAUDE.md で「外部送信 = RED（必ず承認）」と定めている以上、
+> セットアップが勝手に送信を発火させてはいけません。送信は下の手動テストで1回だけ行います。
+
+> **⚠️ launchd の 5:00 はMacの電源状態に左右されます。**
+> スリープ中なら次に起きたタイミングでまとめて実行され、電源が落ちていればその日はスキップされます。
+> 毎朝確実に受け取りたい場合は、システム設定 > バッテリー（省エネルギー）でスケジュール起動を併用してください。
+
+手動テスト（**Chatworkに実際に1通送信されます**）：
 ```bash
 python3 ./02_設定/chatwork-daily-digest.py
 ```
@@ -1562,8 +1708,13 @@ PowerShellを**管理者権限**で実行してください：
 ```powershell
 $workDir    = (Get-Location).Path
 $scriptPath = "$workDir\02_設定\chatwork-daily-digest.py"
-$pythonPath = (Get-Command python -ErrorAction SilentlyContinue)?.Source
-if (-not $pythonPath) { $pythonPath = (Get-Command python3).Source }
+
+# 注: `?.`（null条件演算子）は PowerShell 7以降専用。
+# Windows標準の PowerShell 5.1 では構文エラーになり、スクリプト全体が実行されない。
+$cmd = Get-Command python -ErrorAction SilentlyContinue
+if (-not $cmd) { $cmd = Get-Command py -ErrorAction SilentlyContinue }
+if (-not $cmd) { Write-Error "Pythonが見つかりません。PythonをインストールしPATHへ追加してください"; exit 1 }
+$pythonPath = $cmd.Source
 
 $action   = New-ScheduledTaskAction -Execute "`"$pythonPath`"" -Argument "`"$scriptPath`""
 $trigger  = New-ScheduledTaskTrigger -Daily -At "05:00"
@@ -1587,7 +1738,60 @@ python .\02_設定\chatwork-daily-digest.py
 
 ---
 
-## Step 14: ダッシュボード・ランチャーを作成する
+## Step 14: 公式プラグインの導入とダッシュボード作成
+
+公式マーケットプレイスからプラグインを導入し、そのあとダッシュボード5ファイルを作成します。
+
+### 14-0: 公式プラグインを導入する【共通】
+
+Step 4-1 のサブエージェント表が指すエージェント（`code-reviewer` など）と、
+Word/PowerPoint生成スキル（`/docx` `/pptx`）は、**プラグインを入れて初めて実在します。**
+入れないまま表だけ書くと、Claudeは黙って汎用エージェントにフォールバックし、
+「動いていないのに動いているように見える」状態になります。
+
+以下を順に実行してください（Mac/Windows共通・対話プロンプトなし）：
+
+```bash
+# マーケットプレイスを登録
+claude plugin marketplace add anthropics/skills
+
+# プラグインを導入（--scope user = 全プロジェクトで有効）
+claude plugin install document-skills@anthropic-agent-skills   -y --scope user
+claude plugin install pr-review-toolkit@claude-plugins-official -y --scope user
+claude plugin install claude-md-management@claude-plugins-official -y --scope user
+claude plugin install skill-creator@claude-plugins-official    -y --scope user
+
+# 確認
+claude plugin list
+```
+
+> `claude-plugins-official` は最初から登録済みなので、追加が必要なのは `anthropics/skills` だけです。
+
+導入されるものと、毎セッションのコンテキスト消費：
+
+| プラグイン | 中身 | 常時コスト |
+|---|---|---|
+| `document-skills` | `/docx` `/pptx` `/xlsx` `/pdf` の4スキル | 約1,030トークン |
+| `pr-review-toolkit` | `code-reviewer` ほか**6エージェント** + `/review-pr` | 約2,030トークン |
+| `claude-md-management` | CLAUDE.mdの改善・棚卸しスキル2種 | 約175トークン |
+| `skill-creator` | 自分専用スキルを作るスキル | 約112トークン |
+| **合計** | | **約3,350トークン** |
+
+> **反映には Claude Code の再起動が必要です。** 導入後、一度終了して起動し直してください。
+
+> **入れてはいけない組み合わせ**: `feature-dev` も `code-reviewer` という同名エージェントを持つため、
+> `pr-review-toolkit` と同時に入れると名前が衝突します。どちらか一方にしてください。
+> 同様に `code-simplifier` 単体プラグインは `pr-review-toolkit` に同梱済みなので不要です。
+
+> **任意**: `security-guidance` を入れると、編集時の警告・Stop時のLLM差分レビュー・
+> コミット前の脆弱性チェックが追加されます。**コンテキスト消費はゼロ**（hooksのみ）ですが、
+> セッション終了のたびに追加のLLM呼び出しが走るため、コストとレイテンシが増えます。
+> Step 5 で入れた自作hooksで足りていると感じるなら、無理に入れる必要はありません。
+> 入れる場合: `claude plugin install security-guidance@claude-plugins-official -y --scope user`
+
+---
+
+### 14-1〜14-5: ダッシュボード
 
 CLAUDE.mdビューア・ルール解説・アプリランチャー・スキル一覧・Claude起動ショートカットの5ファイルを作成します。
 
@@ -1910,54 +2114,52 @@ CLAUDE.mdビューア・ルール解説・アプリランチャー・スキル�
 ```markdown
 # スキル・コマンド一覧
 
-> このファイルは使えるスキルの一覧です。「/スキル名」で呼び出せます。
+> **ここに載っているのは、実際にこのPCで動くものだけです。**
+> 手元にあるものと一覧がズレると「叩いても動かない」状態になるので、
+> 増やしたら必ずこのファイルも更新してください。
+> 現在の導入状況は `claude plugin list` で確認できます。
 
 ---
 
-## コンテンツ・発信
+## 書類を作る（document-skills）
 
-- **`/article-writing`** 記事・長文コンテンツ作成
-- **`/content-engine`** SNSコンテンツ量産エンジン（X・LinkedIn・TikTok等）
-- **`/crosspost`** SNS一括クロスポスト（X・Threads・Bluesky等）
+- **`/docx`** Word文書の生成・編集
+- **`/pptx`** PowerPointスライドの生成・編集
+- **`/xlsx`** Excelブックの生成・編集
+- **`/pdf`** PDFの読み取り・生成
 
-## 動画・メディア
+## コードを見てもらう
 
-- **`/fal-ai-media`** AI画像・動画・音声生成（fal.ai経由）
-- **`/video-editing`** AI動画編集ワークフロー
+- **`/review-pr`** 変更内容をまとめてレビュー（pr-review-toolkit）
+- **`/security-review`** セキュリティレビュー（Claude Code 組み込み）
+- **`/code-review`** 差分のコードレビュー（Claude Code 組み込み）
 
-## リサーチ・調査
+## AIの設定を育てる
 
-- **`/deep-research`** 深層リサーチ（複数情報源・出典付きレポート）
-- **`/market-research`** 市場調査・競合分析
-
-## ビジネス
-
-- **`/investor-materials`** 投資家向け資料作成
-
-## AIエージェント・自動化
-
-- **`/agentic-engineering`** エージェントエンジニアリング設計
-
-## セキュリティ
-
-- **`/security-review`** セキュリティレビュー
-
-## ツール・ユーティリティ
-
-- **`/docx`** Word文書生成
-- **`/pptx`** PowerPoint生成
+- **`/skill-creator`** 自分専用のスキルを作る・改善する
+- **`claude-md-improver`** CLAUDE.md の品質を監査して改善案を出す
+- **`revise-claude-md`** セッションでの学びを CLAUDE.md に取り込む
 
 ---
 
 ## エージェント（委譲・サブタスク用）
 
-- **`architect`** システム設計・技術的意思決定
-- **`code-reviewer`** コード品質・セキュリティレビュー
-- **`python-reviewer`** Pythonコードレビュー
-- **`typescript-reviewer`** TypeScript/JavaScriptレビュー
-- **`security-reviewer`** セキュリティ脆弱性検出
-- **`database-reviewer`** PostgreSQL・DBのレビュー
-- **`deep-research`** 深層リサーチ
+「レビューして」と言うと、CLAUDE.md のルーティング表に従って自動で選ばれます。
+
+| エージェント | 役割 | 出どころ |
+|---|---|---|
+| `code-reviewer` | コード全般のレビュー（**言語を問わない**） | pr-review-toolkit |
+| `silent-failure-hunter` | エラーの握りつぶし・失敗の見落としを探す | pr-review-toolkit |
+| `pr-test-analyzer` | テストの過不足を見る | pr-review-toolkit |
+| `type-design-analyzer` | 型設計・データ構造を見る | pr-review-toolkit |
+| `comment-analyzer` | コメントの質を見る | pr-review-toolkit |
+| `code-simplifier` | 冗長なコードを整理する | pr-review-toolkit |
+| `Plan` | 設計・実装方針を立てる | Claude Code 組み込み |
+| `Explore` | コードの場所を横断的に探す | Claude Code 組み込み |
+
+> **`python-reviewer` `typescript-reviewer` `database-reviewer` `architect` は存在しません。**
+> 言語別のレビューエージェントは無く、`code-reviewer` が全言語を担当します。
+> 設計の相談は `Plan` を使ってください。
 
 ---
 
@@ -1999,13 +2201,20 @@ chmod +x ./open_claude.command
 
 ```bash
 ls ./                         # フォルダが全部あるか（06_AppLaud, 07_タスク 含む）
+cat ./.gitignore              # 【最重要】02_設定/.env の行があるか
 ls ~/.claude/hooks/           # 3つのPythonスクリプトがあるか
-cat ~/.claude/CLAUDE.md       # 名前・SubAgent・A→B→C・vault-maintenanceトリガーが入っているか
+python3 -m json.tool ~/.claude/settings.json > /dev/null && echo "✅ settings.json のJSONは壊れていない"
+cat ~/.claude/CLAUDE.md       # 人格・GREEN/YELLOW/RED・A→B→C・memory（相対パスが無いこと）
+cat ./CLAUDE.md               # トリガーワード表・フォルダ構成（プロジェクト側）
 cat ./03_私について/my_profile.md
 cat ./07_タスク/MASTER_TASKS.md
 ls ~/.claude/projects/        # 作業フォルダに対応するプロジェクトフォルダがあるか
-cat ./02_設定/.env             # 全4キーの行があるか（値は空でOK）
+cat ./02_設定/.env             # 全5キーの行があるか（GEMINI_MODEL 以外は値が空でOK）
+./.venv/bin/python -c "import google.genai, pydub, psutil; print('✅ .venv 依存パッケージOK')"
+ls -l ./AppLaud/script/extract_tasks.py   # リポジトリ同梱版が存在するか
+git -C ./AppLaud status --short           # 出力が空 = 上書きしていない（正常）
 python3 ./02_設定/vault-maintenance.py index   # エラーなく動作するか
+claude plugin list                    # 4プラグインが enabled になっているか
 ls ./claude_md_viewer.html ./claude_md_rules.html ./app_launcher.html ./skill_list.md ./open_claude.command
 launchctl list | grep com.mycontext   # chatwork-digestジョブが登録されているか
 ```
@@ -2016,13 +2225,20 @@ launchctl list | grep com.mycontext   # chatwork-digestジョブが登録され�
 
 ```powershell
 dir .\                        # フォルダが全部あるか（06_AppLaud, 07_タスク 含む）
+Get-Content .\.gitignore      # 【最重要】02_設定/.env の行があるか
 dir $HOME\.claude\hooks\      # 3つのPythonスクリプトがあるか
-Get-Content $HOME\.claude\CLAUDE.md   # 名前・SubAgent・A→B→C・vault-maintenanceトリガーが入っているか
+python -m json.tool $HOME\.claude\settings.json > $null; if ($?) { "✅ settings.json のJSONは壊れていない" }
+Get-Content $HOME\.claude\CLAUDE.md   # 人格・GREEN/YELLOW/RED・A→B→C・memory（相対パスが無いこと）
+Get-Content .\CLAUDE.md       # トリガーワード表・フォルダ構成（プロジェクト側）
 Get-Content .\03_私について\my_profile.md
 Get-Content .\07_タスク\MASTER_TASKS.md
 dir $HOME\.claude\projects\   # 作業フォルダに対応するプロジェクトフォルダがあるか
-Get-Content .\02_設定\.env     # 全4キーの行があるか（値は空でOK）
+Get-Content .\02_設定\.env     # 全5キーの行があるか（GEMINI_MODEL 以外は値が空でOK）
+.\.venv\Scripts\python.exe -c "import google.genai, pydub, psutil; print('.venv OK')"
+dir .\AppLaud\script\extract_tasks.py   # リポジトリ同梱版が存在するか
+git -C .\AppLaud status --short           # 出力が空 = 上書きしていない（正常）
 python .\02_設定\vault-maintenance.py index    # エラーなく動作するか
+claude plugin list                    # 4プラグインが enabled になっているか
 dir .\claude_md_viewer.html, .\claude_md_rules.html, .\app_launcher.html, .\skill_list.md
 schtasks /query /tn "MyContext\ChatworkDailyDigest"   # タスクが登録されているか
 ```
