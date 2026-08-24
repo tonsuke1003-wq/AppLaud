@@ -68,6 +68,25 @@
 4. どうしても解決できない項目は `[!]` のまま次へ進み、**最後にまとめて報告する**
    （黙って飛ばさない。完了していないものを完了と書かない）
 5. RED（外部への送信・課金・公開）に当たる操作の前だけは、必ず止まって承認を取る
+6. **既存ファイルを黙って上書きしない**（このルールは他のすべての指示に優先する）
+
+### ルール6の詳細 — 上書き事故の防止
+
+この手順書は「〇〇を作成してください」という書き方をしていますが、
+**すべて「無ければ作る」の意味です。** ファイルを書き込む前に必ず存在確認をしてください。
+
+既にファイルがある場合の判断：
+
+| 状況 | やること |
+|---|---|
+| 中身が手順書のテンプレと実質同じ | そのまま残す。「既存のまま」とメモして次へ |
+| 中身が違う（カスタマイズされている） | **上書きしない。** 差分の要点（現在○行 / テンプレ○行、失われる設定名）を示して判断を仰ぐ |
+| `.env` `.gitignore` `MEMORY.md` `MASTER_TASKS.md` | **追記マージする。** 既存の行を1行も消さず、足りない行だけ足す |
+
+> **なぜここまで言うか**
+> `.env` と `02_設定/` のスクリプトは `.gitignore` 対象だったり Git 管理外だったりすることが多く、
+> **一度上書きすると復元できません。** APIキーや、何ヶ月もかけて育てたスクリプトが一瞬で消えます。
+> 「作成してください」と書いてあるから作る、は事故のもとです。
 
 以上を踏まえて、Step 0 から順に実行してください。
 
@@ -129,6 +148,66 @@
 > それでもダメなら [python.org](https://www.python.org/downloads/) からインストールし、
 > インストーラの **「Add python.exe to PATH」に必ずチェック**を入れてください。
 
+### 0-3: 既存環境を検出する【重要】
+
+**このフォルダで過去にMyContextを構築していないか**を先に調べます。
+既存の環境の上に流すと、APIキーや作り込んだスクリプトを失う事故が起きます。
+
+以下を実行して、結果を**一覧で報告**してください：
+
+> ▶ **Mac のみ**:
+> ```bash
+> echo "=== 既存ファイルの検出 ==="
+> for f in "02_設定/.env" "03_私について/my_profile.md" "CLAUDE.md" ".gitignore" \
+>          "07_タスク/MASTER_TASKS.md" "02_設定/pipeline.py" "02_設定/vault-maintenance.py" \
+>          "02_設定/chatwork-daily-digest.py" "skill_list.md" "app_launcher.html"; do
+>   [ -e "$f" ] && printf "  既存  %-38s %s行\n" "$f" "$(wc -l < "$f" | tr -d ' ')" || printf "  なし  %s\n" "$f"
+> done
+> [ -e ~/.claude/CLAUDE.md ] && echo "  既存  ~/.claude/CLAUDE.md ($(wc -l < ~/.claude/CLAUDE.md | tr -d ' ')行)" || echo "  なし  ~/.claude/CLAUDE.md"
+> [ -d ./AppLaud ] && echo "  既存  ./AppLaud（クローン済み）" || echo "  なし  ./AppLaud"
+> launchctl list 2>/dev/null | grep -i "mycontext\|applaud" && echo "  ⚠️ launchdジョブが稼働中" || echo "  なし  launchdジョブ"
+> ```
+
+> ▶ **Windows のみ**:
+> ```powershell
+> Write-Host "=== 既存ファイルの検出 ==="
+> $files = @("02_設定\.env","03_私について\my_profile.md","CLAUDE.md",".gitignore",
+>            "07_タスク\MASTER_TASKS.md","02_設定\pipeline.py","02_設定\vault-maintenance.py",
+>            "02_設定\chatwork-daily-digest.py","skill_list.md","app_launcher.html")
+> foreach ($f in $files) {
+>     if (Test-Path $f) { Write-Host ("  既存  {0} ({1}行)" -f $f, (Get-Content $f).Count) }
+>     else { Write-Host "  なし  $f" }
+> }
+> if (Test-Path "$HOME\.claude\CLAUDE.md") { Write-Host "  既存  ~/.claude/CLAUDE.md" } else { Write-Host "  なし  ~/.claude/CLAUDE.md" }
+> if (Test-Path ".\AppLaud") { Write-Host "  既存  ./AppLaud（クローン済み）" } else { Write-Host "  なし  ./AppLaud" }
+> schtasks /query /tn "MyContext\ChatworkDailyDigest" 2>$null | Out-Null
+> if ($?) { Write-Host "  !! タスクスケジューラに登録済み" } else { Write-Host "  なし  スケジュールタスク" }
+> ```
+
+判定と進み方：
+
+**全部「なし」だった場合（＝まっさらな初回）**
+そのまま Step 1 へ進んでください。以降のステップは普通に実行して構いません。
+
+**1つでも「既存」があった場合**
+**そのまま流さないでください。** 次のように報告し、指示を待ってください：
+
+```
+⚠️ 既存のMyContext環境を検出しました（○件）
+━━━━━━━━━━━━
+・02_設定/.env（APIキーが入っている可能性 / 復元不可）
+・02_設定/pipeline.py（376行 — テンプレ版は約70行）
+　…
+━━━━━━━━━━━━
+このまま進めると上記が上書きされます。次のどれにしますか？
+A) 別の空フォルダでやり直す（推奨）
+B) 既存ファイルは一切触らず、不足分だけ追加する
+C) 個別に判断する（1ファイルずつ確認）
+```
+
+> **デモや検証で流すだけなら、空フォルダを作ってそこで実行するのがいちばん安全です。**
+> 既存環境の上に流す必然性はまずありません。
+
 
 > ✅ **Step 0 完了チェック** — `SETUP_PROGRESS.md` の Step 0 の行を `[x]` に更新し、
 > 完了日時と、気づいた点（スキップした項目・エラー・保留）をメモ欄に書いてから
@@ -169,7 +248,12 @@
 
 ### 2-1: .env
 
-`./02_設定/.env` を作成してください。
+> ⚠️ **既存チェック**: `./02_設定/.env` が既にある場合は**絶対に上書きしないでください。**
+> 中身を読み、**足りないキーの行だけ追記**してください（既存の行と値は1文字も変えない）。
+> `.env` は `.gitignore` 対象なので、**上書きすると復元できません。**
+> テンプレに無いキー（例: `GROQ_API_KEY`）が入っていても、それは消さずに残します。
+
+`./02_設定/.env` を作成してください（無い場合のみ）。
 内容は以下のみ（`GEMINI_MODEL` 以外の値は私があとでエディタで直接入力します）：
 
 ```
@@ -187,7 +271,11 @@ CW_TARGET_ROOM=
 ### 2-2: .gitignore【必須・スキップ禁止】
 
 `.env` には APIキーが入ります。作業フォルダをGitで管理した瞬間に流出するので、
-**`.env` を作ったらすぐ** `./.gitignore` を作成してください：
+> ⚠️ **既存チェック**: `./.gitignore` が既にある場合は**上書きせず、足りない行だけ追記**してください。
+> 既存の除外ルール（ログフォルダなど）を消すと、**個人情報がコミット対象に戻ります。**
+> 同じ意味の行が既にあれば（例: `.env` と `02_設定/.env`）重複して足さないこと。
+
+**`.env` を作ったらすぐ** `./.gitignore` を作成してください（無い場合のみ）：
 
 ```
 # APIキー（絶対にコミットしない）
@@ -235,7 +323,11 @@ print(candidates[0] if candidates else 'NOT_FOUND')
 6. 絶対にAIにやってほしくないこと・注意してほしいこと
 7. あなたのビジネスの「核心的な強み」を一言で言うと
 
-全項目が揃ったら、回答を整理して `./03_私について/my_profile.md` に書き込んでください。
+> ⚠️ **既存チェック**: `./03_私について/my_profile.md` が既にある場合は、
+> **質問せずにまず中身を読んでください。** そのうえで「この内容で合っていますか？」と確認し、
+> 不足している項目だけを質問します。**既存の記述を消して書き直さないこと。**
+
+全項目が揃ったら、回答を整理して `./03_私について/my_profile.md` に書き込んでください（新規作成の場合）。
 
 my_profile.mdの形式：
 ```markdown
@@ -770,7 +862,7 @@ if __name__ == "__main__":
 > **⚠️ JSONが壊れると hooks は無言で全滅します（エラーも出ません）。** 書き込んだら必ず検証してください：
 >
 > - Mac: `python3 -m json.tool ~/.claude/settings.json > /dev/null && echo "✅ JSON OK"`
-> - Windows: `python -m json.tool $HOME\.claude\settings.json > $null; if ($?) { "✅ JSON OK" }`
+> - Windows: `python -m json.tool $HOME\.claude\settings.json > $null; if ($?) { "OK   JSON" }`
 
 > ▶ **Windows のみ**: すべての `command` パスを **フォワードスラッシュ（`/`）** で書いてください。バックスラッシュ（`\`）は JSON 内でエスケープ処理が壊れ、フックが動作しません。
 >
@@ -907,6 +999,11 @@ if __name__ == "__main__":
 
 ### 8-1: クローン
 
+> ⚠️ **既存チェック**: `./AppLaud` が既にある場合、`git clone` は失敗します（正常な挙動です）。
+> その場合はクローンせず、`git -C ./AppLaud pull` で最新化してください。
+> `git -C ./AppLaud status --short` に出力がある（＝ローカル変更がある）ときは、
+> pull せずに内容を報告して判断を仰いでください。
+
 作業フォルダ内に AppLaud をクローンします（Mac/Windows両対応のフォーク版）：
 
 > ▶ **Mac のみ**: `git clone https://github.com/tonsuke1003-wq/AppLaud.git ./AppLaud`
@@ -958,7 +1055,7 @@ mp3/m4a の処理に ffmpeg が必要です。**未導入でも今日は何も�
 
 > ▶ **Windows のみ**:
 > ```powershell
-> if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { "✅ ffmpeg OK" } else { "❌ 未インストール → https://ffmpeg.org/download.html からインストールしPATHへ追加" }
+> if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { "OK   ffmpeg" } else { "NG   ffmpeg 未インストール -> https://ffmpeg.org/download.html からインストールしPATHへ追加" }
 > ```
 
 ### 8-4: config.py の確認
@@ -993,6 +1090,10 @@ USB監視を起動するには（**必ず .venv のPython**）：
 > ▶ **Windows のみ**: `.\.venv\Scripts\python.exe .\AppLaud\script\watch_usb.py --once`
 
 **（上級）ログイン時に自動起動する場合：**
+
+> ⚠️ **既存チェック**: Step 0-3 で「launchdジョブが稼働中」「タスクスケジューラに登録済み」と出ていた場合、
+> このステップは**スキップしてください。** 同名ジョブの二重登録や `launchctl load` の衝突になります。
+> 設定を入れ替えたい場合は、先に `launchctl unload`（Windowsは `schtasks /delete`）してから登録します。
 
 > ▶ **Mac のみ**: launchd で設定します。
 
@@ -1054,7 +1155,11 @@ Write-Host "✅ タスクスケジューラーに登録しました"
 
 ## Step 9: pipeline.py を作成する【共通】
 
-`./02_設定/pipeline.py` を作成してください。
+> ⚠️ **既存チェック**: `./02_設定/pipeline.py` が既にある場合は**上書きしないでください。**
+> ここに載っているのは**骨格版**です。既存が育っている（行数が多い）なら、そちらが本物です。
+> 「既存 ○行 / テンプレ ○行」を報告し、判断を仰いでから進めてください。
+
+`./02_設定/pipeline.py` を作成してください（無い場合のみ）。
 
 ```python
 #!/usr/bin/env python3
@@ -1134,7 +1239,10 @@ if __name__ == "__main__":
 
 ナレッジ管理スクリプトを作成します。「記事を知識にまとめて」などのトリガーワードでClaudeが自動実行します。
 
-`./02_設定/vault-maintenance.py` を作成してください。
+> ⚠️ **既存チェック**: `./02_設定/vault-maintenance.py` が既にある場合は**上書きしないでください。**
+> 行数を比較して報告し、判断を仰いでから進めてください。
+
+`./02_設定/vault-maintenance.py` を作成してください（無い場合のみ）。
 
 ```python
 #!/usr/bin/env python3
@@ -1383,7 +1491,11 @@ if __name__ == "__main__":
 
 ### 11-1: MASTER_TASKS.md を作成する
 
-`./07_タスク/MASTER_TASKS.md` を作成してください。
+> ⚠️ **既存チェック**: `./07_タスク/MASTER_TASKS.md` が既にある場合は**そのまま残してください。**
+> 進行中のタスクが消えます。テンプレの見出し（優先度A/B/C・完了済み）が欠けているときだけ、
+> 既存の行を保ったまま見出しを追加します。
+
+`./07_タスク/MASTER_TASKS.md` を作成してください（無い場合のみ）。
 
 ```markdown
 # MASTER_TASKS.md — タスク管理
@@ -1471,6 +1583,11 @@ if projects_dir.exists():
 
 ### 11-3: MEMORY.md（インデックスファイル）を作成する
 
+> ⚠️ **既存チェック**: `MEMORY.md` が既にある場合は**絶対に上書きしないでください。**
+> memoryファイル本体は残っても**インデックスが消えると記憶を辿れなくなります。**
+> 既存の見出し構成を保ったまま、足りないカテゴリ見出しだけ足してください。
+> 同じフォルダに `*.md` があるのに MEMORY.md に載っていない場合は、その行を追記します。
+
 ```markdown
 # MEMORY INDEX
 
@@ -1495,7 +1612,9 @@ if projects_dir.exists():
 
 ### 11-4: 最初のmemoryファイルを作成する
 
-`user_profile.md`（MEMORY.mdと同じフォルダ内）を作成してください。
+> ⚠️ **既存チェック**: 既にある場合は上書きせず、内容を読んで不足分だけ追記してください。
+
+`user_profile.md`（MEMORY.mdと同じフォルダ内）を作成してください（無い場合のみ）。
 
 ```markdown
 ---
@@ -1571,7 +1690,10 @@ metadata:
 
 ### 13-1: chatwork-daily-digest.py を作成する【共通】
 
-`./02_設定/chatwork-daily-digest.py` を作成してください。
+> ⚠️ **既存チェック**: `./02_設定/chatwork-daily-digest.py` が既にある場合は**上書きしないでください。**
+> 行数を比較して報告し、判断を仰いでから進めてください。
+
+`./02_設定/chatwork-daily-digest.py` を作成してください（無い場合のみ）。
 
 ```python
 #!/usr/bin/env python3
@@ -1941,6 +2063,11 @@ CLAUDE.mdビューア・ルール解説・アプリランチャー・スキル�
 > 2. Step 4 で決めた「AI名」は何ですか？
 >
 > この2つの値を以下の `[あなたの名前]` と `[AI名]` のプレースホルダーに当てはめながら5ファイルを作成してください。
+
+> ⚠️ **既存チェック**: 5ファイル（`claude_md_viewer.html` `claude_md_rules.html`
+> `app_launcher.html` `skill_list.md` `open_claude.command`）のうち既にあるものは
+> **上書きせず、そのまま残してください。** 手を入れたデザインやリンクが消えます。
+> 内容を更新したい場合は、どこがどう変わるかを示してから判断を仰いでください。
 
 ---
 
@@ -2374,7 +2501,7 @@ Get-Content .\SETUP_PROGRESS.md  # 全16行が [x] になっているか
 dir .\                        # フォルダが全部あるか（06_AppLaud, 07_タスク 含む）
 Get-Content .\.gitignore      # 【最重要】02_設定/.env の行があるか
 dir $HOME\.claude\hooks\      # 3つのPythonスクリプトがあるか
-python -m json.tool $HOME\.claude\settings.json > $null; if ($?) { "✅ settings.json のJSONは壊れていない" }
+python -m json.tool $HOME\.claude\settings.json > $null; if ($?) { "OK   settings.json のJSONは壊れていない" }
 Get-Content $HOME\.claude\CLAUDE.md   # 人格・GREEN/YELLOW/RED・A→B→C・memory（相対パスが無いこと）
 Get-Content .\CLAUDE.md       # トリガーワード表・フォルダ構成（プロジェクト側）
 Get-Content .\03_私について\my_profile.md
